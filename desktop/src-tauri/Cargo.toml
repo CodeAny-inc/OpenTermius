@@ -38,3 +38,7 @@ objc2-local-authentication = { version = "=0.3.2", default-features = false, fea
 
 [features]
 custom-protocol = ["tauri/custom-protocol"]
+# Keep Touch ID unavailable in ordinary/ad-hoc signed builds. Release builds
+# should enable this only after proper Apple signing + Data Protection Keychain
+# entitlements are configured and validated.
+macos-biometric = []
