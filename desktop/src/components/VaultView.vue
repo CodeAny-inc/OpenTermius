@@ -11,6 +11,9 @@ import {
   Unlock,
   ShieldCheck,
   AlertTriangle,
+  Fingerprint,
+  Loader2,
+  Check,
 } from "lucide-vue-next";
 
 const vault = useVaultStore();
@@ -18,9 +21,16 @@ const vault = useVaultStore();
 const passphrase = ref("");
 const confirmPassphrase = ref("");
 const error = ref("");
+const biometricLoading = ref(false);
+const enableBiometricMode = ref(false);
+const biometricPassphrase = ref("");
 
 onMounted(async () => {
   await vault.checkStatus();
+  // If biometric is enabled, try to auto-unlock on mount
+  if (vault.biometricEnabled && vault.needsUnlock) {
+    await tryBiometricUnlock();
+  }
 });
 
 async function setup() {
@@ -55,17 +65,48 @@ async function unlock() {
 async function lock() {
   await vault.lock();
 }
+
+async function tryBiometricUnlock() {
+  biometricLoading.value = true;
+  error.value = "";
+  try {
+    await vault.unlockWithBiometric();
+  } catch (e: any) {
+    error.value = String(e);
+  } finally {
+    biometricLoading.value = false;
+  }
+}
+
+async function enableBiometric() {
+  error.value = "";
+  try {
+    await vault.enableBiometric(biometricPassphrase.value);
+    biometricPassphrase.value = "";
+    enableBiometricMode.value = false;
+  } catch (e: any) {
+    error.value = String(e);
+  }
+}
+
+async function disableBiometric() {
+  await vault.disableBiometric();
+}
+
+const showBiometricButton = computed(
+  () => vault.biometricAvailable && vault.biometricEnabled && vault.needsUnlock,
+);
 </script>
 
 <template>
   <div class="flex flex-col h-full overflow-hidden">
     <!-- Header -->
-    <div class="flex h-11 items-center gap-2 border-b border-border px-4 pl-12 md:pl-4">
+    <div class="flex h-11 items-center gap-2 border-b border-border px-4">
       <h2 class="text-[14px] font-semibold">Vault</h2>
     </div>
 
     <!-- Content -->
-    <div class="flex-1 overflow-y-auto p-4 sm:p-6">
+    <div class="flex-1 overflow-y-auto p-6">
       <div class="max-w-[480px] mx-auto">
         <!-- Status card -->
         <div class="flex items-center gap-3 rounded-lg border border-border bg-card p-4 mb-6">
@@ -119,6 +160,24 @@ async function lock() {
 
         <!-- Unlock mode -->
         <div v-else-if="vault.needsUnlock" class="flex flex-col gap-4">
+          <!-- Biometric unlock button -->
+          <Button
+            v-if="showBiometricButton"
+            variant="outline"
+            :disabled="biometricLoading"
+            @click="tryBiometricUnlock"
+          >
+            <Loader2 v-if="biometricLoading" class="size-3.5 mr-1 animate-spin" :stroke-width="1.75" />
+            <Fingerprint v-else class="size-3.5" :stroke-width="1.75" />
+            {{ biometricLoading ? "Waiting for Touch ID..." : "Unlock with Touch ID" }}
+          </Button>
+
+          <div v-if="showBiometricButton" class="flex items-center gap-2 text-[11px] text-muted-foreground">
+            <div class="flex-1 h-px bg-border"></div>
+            <span>or use passphrase</span>
+            <div class="flex-1 h-px bg-border"></div>
+          </div>
+
           <FormGroup>
             <Label for="unlock-pass">Master passphrase</Label>
             <Input
@@ -137,11 +196,71 @@ async function lock() {
         </div>
 
         <!-- Unlocked mode -->
-        <div v-else class="flex flex-col gap-3">
+        <div v-else class="flex flex-col gap-4">
           <p class="text-[13px] text-muted-foreground">
             Your vault is unlocked. SSH keys and credentials are accessible.
             Lock the vault when you're done to keep your data secure.
           </p>
+
+          <!-- Biometric settings -->
+          <div v-if="vault.biometricAvailable" class="rounded-lg border border-border p-4">
+            <div class="flex items-center gap-2 mb-2">
+              <Fingerprint class="size-4 text-muted-foreground" :stroke-width="1.75" />
+              <span class="text-[13px] font-medium">Touch ID / Biometric Unlock</span>
+            </div>
+
+            <!-- Biometric enabled -->
+            <template v-if="vault.biometricEnabled">
+              <p class="text-[12px] text-muted-foreground mb-3">
+                <Check class="inline size-3 text-green-500 mr-1" :stroke-width="2" />
+                Biometric unlock is enabled. You can unlock the vault with Touch ID
+                instead of typing your passphrase.
+              </p>
+              <Button variant="outline" size="sm" @click="disableBiometric">
+                Disable biometric unlock
+              </Button>
+            </template>
+
+            <!-- Biometric not yet enabled -->
+            <template v-else>
+              <p class="text-[12px] text-muted-foreground mb-3">
+                Enable biometric unlock to use Touch ID instead of typing your
+                passphrase every time. The passphrase is stored in the OS keychain
+                with biometric protection.
+              </p>
+
+              <!-- Enable form -->
+              <div v-if="enableBiometricMode" class="flex flex-col gap-3">
+                <FormGroup>
+                  <Label for="bio-pass">Confirm master passphrase</Label>
+                  <Input
+                    id="bio-pass"
+                    v-model="biometricPassphrase"
+                    type="password"
+                    placeholder="Enter your master passphrase"
+                    @keydown.enter="enableBiometric"
+                  />
+                </FormGroup>
+                <p v-if="error" class="text-[12px] text-destructive">{{ error }}</p>
+                <div class="flex items-center gap-2">
+                  <Button size="sm" @click="enableBiometric">
+                    <Fingerprint class="size-3.5" :stroke-width="1.75" />
+                    Enable
+                  </Button>
+                  <Button variant="ghost" size="sm" @click="enableBiometricMode = false; error = ''">
+                    Cancel
+                  </Button>
+                </div>
+              </div>
+
+              <!-- Enable button -->
+              <Button v-else variant="outline" size="sm" @click="enableBiometricMode = true">
+                <Fingerprint class="size-3.5" :stroke-width="1.75" />
+                Enable biometric unlock
+              </Button>
+            </template>
+          </div>
+
           <Button variant="outline" @click="lock">
             <Lock class="size-3.5" :stroke-width="1.75" />
             Lock Vault Now
