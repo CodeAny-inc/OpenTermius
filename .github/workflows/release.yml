@@ -133,26 +133,23 @@ jobs:
           echo "Expected bundle dir: $TARGET_DIR"
 
           # Also check alternative locations
-          ALT_DIRS=(
-            "$GITHUB_WORKSPACE/target/release/bundle"
-            "$GITHUB_WORKSPACE/desktop/src-tauri/target/release/bundle"
-          )
+          ALT_DIRS="$GITHUB_WORKSPACE/target/release/bundle $GITHUB_WORKSPACE/desktop/src-tauri/target/release/bundle"
           if [ -n "$RUST_TARGET" ]; then
-            ALT_DIRS+=("$GITHUB_WORKSPACE/target/$RUST_TARGET/release/bundle")
-            ALT_DIRS+=("$GITHUB_WORKSPACE/desktop/src-tauri/target/$RUST_TARGET/release/bundle")
+            ALT_DIRS="$ALT_DIRS $GITHUB_WORKSPACE/target/$RUST_TARGET/release/bundle $GITHUB_WORKSPACE/desktop/src-tauri/target/$RUST_TARGET/release/bundle"
           fi
 
           upload_sig() {
             local sigfile="$1"
-            local basename=$(basename "$sigfile")
+            local basename
+            basename=$(basename "$sigfile")
             # macOS .app.tar.gz.sig files don't include arch in filename,
             # but the uploaded asset does (e.g. OpenTermius_aarch64.app.tar.gz).
             # Rename the .sig to match the asset name.
-            if [[ "$basename" == "OpenTermius.app.tar.gz.sig" ]] && [[ -n "$RUST_TARGET" ]]; then
+            if [ "$basename" = "OpenTermius.app.tar.gz.sig" ] && [ -n "$RUST_TARGET" ]; then
               local arch=""
-              if [[ "$RUST_TARGET" == "aarch64-apple-darwin" ]]; then
+              if [ "$RUST_TARGET" = "aarch64-apple-darwin" ]; then
                 arch="aarch64"
-              elif [[ "$RUST_TARGET" == "x86_64-apple-darwin" ]]; then
+              elif [ "$RUST_TARGET" = "x86_64-apple-darwin" ]; then
                 arch="x64"
               fi
               if [ -n "$arch" ]; then
@@ -168,36 +165,36 @@ jobs:
           }
 
           UPLOADED=0
-          for dir in "${ALT_DIRS[@]}"; do
+          for dir in $ALT_DIRS; do
             if [ -d "$dir" ]; then
               echo "Searching in: $dir"
-              ls -la "$dir" 2>/dev/null || true
-              # Use globstar to find .sig files
-              shopt -s globstar nullglob dotglob
-              for sigfile in "$dir"/**/*.sig; do
-                if [ -f "$sigfile" ]; then
+              # Use find with -exec to avoid pipe/subshell issues
+              find "$dir" -name "*.sig" -type f -exec echo "Found: {}" \; 2>/dev/null || true
+              SIG_LIST=$(find "$dir" -name "*.sig" -type f 2>/dev/null || true)
+              if [ -n "$SIG_LIST" ]; then
+                echo "$SIG_LIST" | while IFS= read -r sigfile; do
                   upload_sig "$sigfile"
-                  UPLOADED=1
-                fi
-              done
-              shopt -u globstar nullglob dotglob
+                done
+                UPLOADED=1
+              fi
             fi
           done
 
           if [ "$UPLOADED" -eq 0 ]; then
-            echo "No .sig files found via glob. Trying find as fallback..."
-            while IFS= read -r sigfile; do
-              if [ -n "$sigfile" ]; then
+            echo "No .sig files found in expected dirs. Searching entire target..."
+            SIG_LIST=$(find "$GITHUB_WORKSPACE/target" -name "*.sig" -type f 2>/dev/null || true)
+            if [ -n "$SIG_LIST" ]; then
+              echo "$SIG_LIST" | while IFS= read -r sigfile; do
                 upload_sig "$sigfile"
-                UPLOADED=1
-              fi
-            done < <(find "$GITHUB_WORKSPACE/target" -name "*.sig" -type f 2>/dev/null || true)
+              done
+              UPLOADED=1
+            fi
           fi
 
           if [ "$UPLOADED" -eq 0 ]; then
             echo "WARNING: No .sig files were uploaded"
-            echo "Listing target/release/bundle:"
-            ls -laR "$GITHUB_WORKSPACE/target/release/bundle/" 2>/dev/null || echo "No bundle directory"
+            echo "Listing $TARGET_DIR:"
+            ls -laR "$TARGET_DIR" 2>/dev/null || echo "Bundle directory not found"
           fi
 
           echo "Done uploading .sig files"
