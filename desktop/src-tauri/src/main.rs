@@ -111,7 +111,7 @@ async fn check_for_updates_silent(app: tauri::AppHandle) {
             // Emit event so the frontend can show an update banner
             let _ = app.emit("update-available", serde_json::json!({
                 "version": update.version,
-                "date": update.date,
+                "date": update.date.map(|d| d.to_string()),
                 "body": update.body,
             }));
             // Stash the update object in app state for later install
