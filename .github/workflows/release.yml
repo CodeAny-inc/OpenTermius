@@ -113,24 +113,58 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ needs.prepare.outputs.tag }}
+          RUST_TARGET: ${{ matrix.rust_target }}
         run: |
           # tauri-action generates .sig files but doesn't always upload them.
-          # Find all .sig files in the bundle output and upload them manually.
-          BUNDLE_DIR="desktop/src-tauri/target"
-          if [ -n "${{ matrix.rust_target }}" ]; then
-            BUNDLE_DIR="$BUNDLE_DIR/${{ matrix.rust_target }}/release/bundle"
-          else
-            BUNDLE_DIR="$BUNDLE_DIR/release/bundle"
-          fi
-          echo "Looking for .sig files in $BUNDLE_DIR"
-          if [ ! -d "$BUNDLE_DIR" ]; then
-            echo "Bundle directory not found, skipping"
-            exit 0
-          fi
-          find "$BUNDLE_DIR" -name "*.sig" -type f | while read -r sigfile; do
+          # The Cargo workspace is at the repo root, so the target directory
+          # is at the repo root level, not desktop/src-tauri/target.
+          # Try multiple possible locations.
+          CANDIDATES=(
+            "target/release/bundle"
+            "target/${RUST_TARGET}/release/bundle"
+            "desktop/src-tauri/target/release/bundle"
+            "desktop/src-tauri/target/${RUST_TARGET}/release/bundle"
+          )
+          upload_sig() {
+            local sigfile="$1"
+            local basename=$(basename "$sigfile")
+            # macOS .app.tar.gz.sig files don't include arch in filename,
+            # but the uploaded asset does (e.g. OpenTermius_aarch64.app.tar.gz).
+            # Rename the .sig to match the asset name.
+            if [[ "$basename" == "OpenTermius.app.tar.gz.sig" ]] && [[ -n "$RUST_TARGET" ]]; then
+              local arch=""
+              if [[ "$RUST_TARGET" == "aarch64-apple-darwin" ]]; then
+                arch="aarch64"
+              elif [[ "$RUST_TARGET" == "x86_64-apple-darwin" ]]; then
+                arch="x64"
+              fi
+              if [ -n "$arch" ]; then
+                local newname="OpenTermius_${arch}.app.tar.gz.sig"
+                echo "Uploading: $sigfile as $newname"
+                cp "$sigfile" "/tmp/$newname"
+                gh release upload "$TAG" "/tmp/$newname" --clobber
+                return
+              fi
+            fi
             echo "Uploading: $sigfile"
             gh release upload "$TAG" "$sigfile" --clobber
+          }
+          FOUND=0
+          for BUNDLE_DIR in "${CANDIDATES[@]}"; do
+            if [ -d "$BUNDLE_DIR" ]; then
+              echo "Looking for .sig files in $BUNDLE_DIR"
+              find "$BUNDLE_DIR" -name "*.sig" -type f | while read -r sigfile; do
+                upload_sig "$sigfile"
+              done
+              FOUND=1
+            fi
           done
+          if [ "$FOUND" -eq 0 ]; then
+            echo "No bundle directory found, searching entire workspace..."
+            find . -name "*.sig" -type f 2>/dev/null | while read -r sigfile; do
+              upload_sig "$sigfile"
+            done
+          fi
           echo "Done uploading .sig files"
 
   # ──────────────────────────────────────────────
