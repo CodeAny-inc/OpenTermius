@@ -52,6 +52,12 @@ vi.mock("../api", () => ({
   initializeVault: vi.fn(() => Promise.resolve()),
   unlockVault: vi.fn(() => Promise.resolve()),
   lockVault: vi.fn(() => Promise.resolve()),
+  // Biometric
+  biometricAvailable: vi.fn(() => Promise.resolve(false)),
+  biometricPassphraseStored: vi.fn(() => Promise.resolve(false)),
+  storeBiometricPassphrase: vi.fn(() => Promise.resolve()),
+  unlockWithBiometric: vi.fn(() => Promise.resolve(true)),
+  clearBiometricPassphrase: vi.fn(() => Promise.resolve()),
   // Keys
   listKeys: vi.fn(() => Promise.resolve([])),
   generateKey: vi.fn((label: string) =>

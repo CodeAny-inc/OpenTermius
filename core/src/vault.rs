@@ -68,6 +68,22 @@ impl Vault {
         self.save()
     }
 
+    /// Verify that a passphrase can decrypt the vault payload without exposing
+    /// any private-key material to the caller.
+    pub fn verify_passphrase(&self, passphrase: &str) -> Result<()> {
+        if !self.is_initialized() {
+            return Err(CoreError::Vault("vault not initialized".into()));
+        }
+
+        let salt = unbase64(&self.file.salt)?;
+        let mut plaintext = open(passphrase, &salt, &unbase64(&self.file.ciphertext)?)?;
+        let parsed = serde_json::from_slice::<VaultPayload>(&plaintext)
+            .map(|_| ())
+            .map_err(CoreError::from);
+        plaintext.zeroize();
+        parsed
+    }
+
     pub fn add_key(
         &mut self,
         passphrase: &str,
@@ -176,4 +192,20 @@ fn base64(b: impl AsRef<[u8]>) -> String {
 fn unbase64(s: &str) -> Result<Vec<u8>> {
     use base64::{engine::general_purpose::STANDARD, Engine};
     STANDARD.decode(s).map_err(|e| CoreError::Vault(format!("b64: {e}")))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Vault;
+
+    #[test]
+    fn verify_passphrase_rejects_wrong_password() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("vault.json");
+        let mut vault = Vault::open(path).expect("open vault");
+        vault.initialize("correct horse battery staple").expect("initialize");
+
+        assert!(vault.verify_passphrase("correct horse battery staple").is_ok());
+        assert!(vault.verify_passphrase("wrong passphrase").is_err());
+    }
 }

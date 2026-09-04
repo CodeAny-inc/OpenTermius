@@ -1,7 +1,9 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod biometric;
 mod commands;
 mod state;
+mod vault_commands;
 
 use state::AppState;
 use tauri::Manager;
@@ -30,14 +32,10 @@ fn main() {
             let state = AppState::init(app.handle(), app_data);
             app.manage(state);
 
-            // Check for updates on startup (non-blocking, silent)
-            // Only in release builds — skip in dev to avoid noise
             #[cfg(not(debug_assertions))]
             {
                 let handle = app.handle().clone();
                 tauri::async_runtime::spawn(async move {
-                    // Small delay to let the frontend mount and register
-                    // its event listeners before we emit update events
                     tokio::time::sleep(std::time::Duration::from_secs(2)).await;
                     check_for_updates_silent(handle).await;
                 });
@@ -46,50 +44,45 @@ fn main() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
-            // hosts
             commands::list_hosts,
             commands::add_host,
             commands::update_host,
             commands::delete_host,
-            // groups
             commands::list_groups,
             commands::add_group,
             commands::delete_group,
-            // identities
             commands::list_identities,
             commands::add_identity,
             commands::update_identity,
             commands::delete_identity,
-            // vault
             commands::vault_is_initialized,
             commands::initialize_vault,
-            commands::unlock_vault,
+            vault_commands::secure_unlock_vault,
             commands::lock_vault,
             commands::is_vault_unlocked,
-            // keys
+            biometric::biometric_available,
+            biometric::biometric_passphrase_stored,
+            biometric::store_biometric_passphrase,
+            biometric::unlock_with_biometric,
+            biometric::clear_biometric_passphrase,
             commands::list_keys,
             commands::generate_key,
             commands::import_key,
             commands::delete_key,
-            // known hosts
             commands::list_known_hosts,
             commands::remove_known_host,
-            // workspaces
             commands::list_workspaces,
             commands::create_workspace,
             commands::save_workspace,
             commands::delete_workspace,
             commands::set_active_workspace,
-            // sessions
             commands::connect_ssh,
             commands::create_local_terminal,
             commands::session_write,
             commands::session_resize,
             commands::close_session,
             commands::list_sessions,
-            // file I/O
             commands::read_key_file,
-            // updater
             commands::get_app_info,
             commands::check_for_updates,
             commands::install_update,
@@ -98,23 +91,12 @@ fn main() {
         .expect("error while running OpenTermius");
 }
 
-/// Silent background check — emits an event to the frontend if an update
-/// is available, so the UI can show a banner. Does not auto-install.
-///
-/// Uses the custom prerelease-aware check (queries GitHub API for all
-/// releases including prereleases, picks the highest semver version).
 #[cfg(not(debug_assertions))]
 async fn check_for_updates_silent(app: tauri::AppHandle) {
     match commands::check_with_prerelease_endpoint(&app).await {
         Ok(Some(update)) => {
             let current = app.package_info().version.to_string();
-            tracing::info!(
-                "update available: v{} (current: {})",
-                update.version,
-                current
-            );
-            // Emit event so the frontend can show an update banner.
-            // Include ALL fields the frontend UpdateInfo type expects.
+            tracing::info!("update available: v{} (current: {})", update.version, current);
             let _ = app.emit("update-available", serde_json::json!({
                 "available": true,
                 "version": update.version,
@@ -123,11 +105,7 @@ async fn check_for_updates_silent(app: tauri::AppHandle) {
                 "body": update.body,
             }));
         }
-        Ok(None) => {
-            tracing::debug!("no update available");
-        }
-        Err(e) => {
-            tracing::warn!("update check failed: {e}");
-        }
+        Ok(None) => tracing::debug!("no update available"),
+        Err(e) => tracing::warn!("update check failed: {e}"),
     }
 }
