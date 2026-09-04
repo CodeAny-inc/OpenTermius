@@ -1,11 +1,12 @@
 <script setup lang="ts">
-import { ref, onMounted } from "vue";
+import { ref, onMounted, computed } from "vue";
 import { useIdentitiesStore } from "../stores/identities";
 import { useKeysStore } from "../stores/keys";
 import Button from "./ui/Button.vue";
 import Dialog from "./ui/Dialog.vue";
 import Input from "./ui/Input.vue";
 import Select from "./ui/Select.vue";
+import Textarea from "./ui/Textarea.vue";
 import FormGroup from "./ui/FormGroup.vue";
 import Label from "./ui/Label.vue";
 import Badge from "./ui/Badge.vue";
@@ -15,14 +16,28 @@ import {
   Trash2,
   Pencil,
   KeyRound,
+  FolderOpen,
+  Loader2,
+  Sparkles,
+  Upload,
 } from "lucide-vue-next";
-import type { Identity, AuthMethod } from "../types";
+import { open } from "@tauri-apps/plugin-dialog";
+import * as api from "../api";
+import type { Identity, AuthMethod, KeyMeta } from "../types";
 
 const identities = useIdentitiesStore();
 const keys = useKeysStore();
 
 const showForm = ref(false);
 const editing = ref<Identity | null>(null);
+
+// Inline key creation state
+const keyMode = ref<"select" | "generate" | "import">("select");
+const newKeyLabel = ref("");
+const importKeyText = ref("");
+const importKeyPassphrase = ref("");
+const creatingKey = ref(false);
+const browsingFile = ref(false);
 
 const form = ref({
   label: "",
@@ -48,6 +63,10 @@ function addIdentity() {
     keyId: "",
     tags: "",
   };
+  keyMode.value = "select";
+  newKeyLabel.value = "";
+  importKeyText.value = "";
+  importKeyPassphrase.value = "";
   showForm.value = true;
 }
 
@@ -67,6 +86,10 @@ function editIdentity(id: Identity) {
     keyId: id.key_id || "",
     tags: id.tags.join(", "),
   };
+  keyMode.value = "select";
+  newKeyLabel.value = "";
+  importKeyText.value = "";
+  importKeyPassphrase.value = "";
   showForm.value = true;
 }
 
@@ -78,30 +101,112 @@ function buildAuth(): AuthMethod {
   };
 }
 
+const canSave = computed(() => {
+  if (!form.value.label.trim() || !form.value.username.trim()) return false;
+  if (form.value.authMode !== "publickey") return true;
+  // For publickey: need either an existing key selected or a new key being created
+  if (keyMode.value === "select") return !!form.value.keyId;
+  if (keyMode.value === "generate") return !!newKeyLabel.value.trim();
+  if (keyMode.value === "import") return !!newKeyLabel.value.trim() && !!importKeyText.value.trim();
+  return false;
+});
+
+async function ensureKey(): Promise<string | null> {
+  // If selecting an existing key, return it
+  if (keyMode.value === "select") {
+    return form.value.keyId || null;
+  }
+  // Generate a new key
+  if (keyMode.value === "generate") {
+    if (!newKeyLabel.value.trim()) return null;
+    creatingKey.value = true;
+    try {
+      const key = await keys.generateKey(newKeyLabel.value.trim());
+      return key.id;
+    } catch (e) {
+      alert(`Failed to generate key: ${e}`);
+      return null;
+    } finally {
+      creatingKey.value = false;
+    }
+  }
+  // Import a key
+  if (keyMode.value === "import") {
+    if (!newKeyLabel.value.trim() || !importKeyText.value.trim()) return null;
+    creatingKey.value = true;
+    try {
+      const key = await keys.importKey(
+        newKeyLabel.value.trim(),
+        importKeyText.value,
+        importKeyPassphrase.value || null,
+      );
+      return key.id;
+    } catch (e) {
+      alert(`Failed to import key: ${e}`);
+      return null;
+    } finally {
+      creatingKey.value = false;
+    }
+  }
+  return null;
+}
+
 async function save() {
-  if (!form.value.label.trim() || !form.value.username.trim()) return;
+  if (!canSave.value) return;
+  let keyId: string | null = null;
+  if (form.value.authMode === "publickey") {
+    keyId = await ensureKey();
+    if (!keyId) return; // error was shown by ensureKey
+  }
   const identity: Identity = {
     id: editing.value?.id ?? "",
     label: form.value.label.trim(),
     username: form.value.username.trim(),
     auth: buildAuth(),
-    key_id: form.value.authMode === "publickey" ? form.value.keyId || null : null,
+    key_id: keyId,
     tags: form.value.tags
       .split(",")
       .map((t) => t.trim())
       .filter(Boolean),
   };
-  if (editing.value) {
-    await identities.updateIdentity(identity);
-  } else {
-    await identities.addIdentity(identity);
+  try {
+    if (editing.value) {
+      await identities.updateIdentity(identity);
+    } else {
+      await identities.addIdentity(identity);
+    }
+    showForm.value = false;
+  } catch (e) {
+    alert(`Failed to save identity: ${e}`);
   }
-  showForm.value = false;
 }
 
 async function deleteIdentity(id: Identity) {
   if (confirm(`Delete identity "${id.label}"?`)) {
     await identities.deleteIdentity(id.id);
+  }
+}
+
+async function browseForKeyFile() {
+  browsingFile.value = true;
+  try {
+    const selected = await open({
+      multiple: false,
+      directory: false,
+      filters: [
+        { name: "SSH Private Keys", extensions: ["pem", "key", "id_rsa", "id_ed25519", "id_ecdsa", "id_dsa"] },
+        { name: "All Files", extensions: ["*"] },
+      ],
+    });
+    if (typeof selected === "string" && selected) {
+      const content = await api.readKeyFile(selected);
+      importKeyText.value = content;
+    }
+  } catch (e) {
+    console.error("Failed to read key file:", e);
+    alert(`Failed to read key file: ${e}`);
+  } finally {
+    browsingFile.value = false;
   }
 }
 
@@ -190,7 +295,7 @@ function authLabel(auth: AuthMethod): string {
       :open="true"
       :title="editing ? 'Edit Identity' : 'Add Identity'"
       description="An identity bundles a username and authentication method for reuse across hosts"
-      width="480px"
+      width="520px"
       @close="showForm = false"
     >
       <div class="flex flex-col gap-4">
@@ -218,18 +323,107 @@ function authLabel(auth: AuthMethod): string {
           <Input id="id-cred" v-model="form.credentialKey" placeholder="Vault credential key" />
         </FormGroup>
 
-        <FormGroup v-else-if="form.authMode === 'publickey'">
-          <Label for="id-key">SSH Key</Label>
-          <Select id="id-key" v-model="form.keyId">
-            <option value="">Select a key...</option>
-            <option v-for="key in keys.keys" :key="key.id" :value="key.id">
-              {{ key.label }} ({{ key.key_type }})
-            </option>
-          </Select>
-          <p v-if="!keys.keys.length" class="text-[11px] text-muted-foreground mt-1">
-            No keys available. Add one in the Keys section.
-          </p>
-        </FormGroup>
+        <!-- SSH Key section with inline create/import -->
+        <template v-else-if="form.authMode === 'publickey'">
+          <!-- Key mode toggle -->
+          <div class="flex gap-1 p-1 rounded-md bg-muted">
+            <button
+              class="flex-1 h-7 rounded text-[12px] font-medium transition-colors duration-100"
+              :class="keyMode === 'select' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground'"
+              @click="keyMode = 'select'"
+            >
+              Select existing
+            </button>
+            <button
+              class="flex-1 h-7 rounded text-[12px] font-medium transition-colors duration-100"
+              :class="keyMode === 'generate' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground'"
+              @click="keyMode = 'generate'"
+            >
+              <Sparkles class="inline size-3 mr-1" :stroke-width="1.75" />
+              Generate new
+            </button>
+            <button
+              class="flex-1 h-7 rounded text-[12px] font-medium transition-colors duration-100"
+              :class="keyMode === 'import' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground'"
+              @click="keyMode = 'import'"
+            >
+              <Upload class="inline size-3 mr-1" :stroke-width="1.75" />
+              Import
+            </button>
+          </div>
+
+          <!-- Select existing key -->
+          <FormGroup v-if="keyMode === 'select'">
+            <Label for="id-key">SSH Key</Label>
+            <Select id="id-key" v-model="form.keyId">
+              <option value="">Select a key...</option>
+              <option v-for="key in keys.keys" :key="key.id" :value="key.id">
+                {{ key.label }} ({{ key.key_type }})
+              </option>
+            </Select>
+            <p v-if="!keys.keys.length" class="text-[11px] text-muted-foreground mt-1">
+              No keys available. Use Generate or Import to create one.
+            </p>
+          </FormGroup>
+
+          <!-- Generate new key -->
+          <template v-else-if="keyMode === 'generate'">
+            <FormGroup>
+              <Label for="gen-key-label">Key label</Label>
+              <Input
+                id="gen-key-label"
+                v-model="newKeyLabel"
+                placeholder="e.g. Work Laptop Key"
+              />
+            </FormGroup>
+            <p class="text-[12px] text-muted-foreground -mt-2">
+              A new Ed25519 key pair will be generated and stored encrypted in the vault.
+              This key will be linked to the identity automatically.
+            </p>
+          </template>
+
+          <!-- Import key -->
+          <template v-else-if="keyMode === 'import'">
+            <FormGroup>
+              <Label for="imp-key-label">Key label</Label>
+              <Input
+                id="imp-key-label"
+                v-model="newKeyLabel"
+                placeholder="e.g. Imported Server Key"
+              />
+            </FormGroup>
+            <FormGroup>
+              <div class="flex items-center justify-between">
+                <Label for="imp-key-private">Private key (OpenSSH)</Label>
+                <button
+                  class="inline-flex h-6 items-center gap-1 rounded text-[11px] text-muted-foreground hover:text-foreground transition-colors duration-100"
+                  :disabled="browsingFile"
+                  @click="browseForKeyFile"
+                >
+                  <Loader2 v-if="browsingFile" class="size-3 animate-spin" :stroke-width="1.75" />
+                  <FolderOpen v-else class="size-3" :stroke-width="1.75" />
+                  Browse...
+                </button>
+              </div>
+              <Textarea
+                id="imp-key-private"
+                v-model="importKeyText"
+                :rows="5"
+                placeholder="-----BEGIN OPENSSH PRIVATE KEY-----... or click Browse"
+                class="font-mono text-[11px]"
+              />
+            </FormGroup>
+            <FormGroup>
+              <Label for="imp-key-pass">Passphrase (optional)</Label>
+              <Input
+                id="imp-key-pass"
+                v-model="importKeyPassphrase"
+                type="password"
+                placeholder="Leave empty if no passphrase"
+              />
+            </FormGroup>
+          </template>
+        </template>
 
         <FormGroup>
           <Label for="id-tags">Tags (comma-separated)</Label>
@@ -239,7 +433,8 @@ function authLabel(auth: AuthMethod): string {
 
       <template #footer>
         <Button variant="ghost" @click="showForm = false">Cancel</Button>
-        <Button :disabled="!form.label.trim() || !form.username.trim()" @click="save">
+        <Button :disabled="!canSave || creatingKey" @click="save">
+          <Loader2 v-if="creatingKey" class="size-3.5 mr-1 animate-spin" :stroke-width="1.75" />
           {{ editing ? "Save changes" : "Add identity" }}
         </Button>
       </template>

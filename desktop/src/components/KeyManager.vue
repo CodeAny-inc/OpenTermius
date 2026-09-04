@@ -43,18 +43,28 @@ onMounted(() => {
 
 async function generateKey() {
   if (!addForm.value.label.trim()) return;
-  await keys.generateKey(addForm.value.label);
-  resetForm();
+  try {
+    await keys.generateKey(addForm.value.label);
+    resetForm();
+  } catch (e) {
+    console.error("Failed to generate key:", e);
+    alert(`Failed to generate key: ${e}`);
+  }
 }
 
 async function importKey() {
   if (!addForm.value.label.trim() || !addForm.value.privateKey.trim()) return;
-  await keys.importKey(
-    addForm.value.label,
-    addForm.value.privateKey,
-    addForm.value.passphrase || null,
-  );
-  resetForm();
+  try {
+    await keys.importKey(
+      addForm.value.label,
+      addForm.value.privateKey,
+      addForm.value.passphrase || null,
+    );
+    resetForm();
+  } catch (e) {
+    console.error("Failed to import key:", e);
+    alert(`Failed to import key: ${e}`);
+  }
 }
 
 function resetForm() {
@@ -95,6 +105,7 @@ async function browseForKeyFile() {
     }
   } catch (e) {
     console.error("Failed to read key file:", e);
+    alert(`Failed to read key file: ${e}`);
   } finally {
     importing.value = false;
   }
