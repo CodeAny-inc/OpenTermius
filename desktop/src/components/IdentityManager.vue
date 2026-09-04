@@ -159,7 +159,7 @@ async function save() {
     if (!keyId) return; // error was shown by ensureKey
   }
   const identity: Identity = {
-    id: editing.value?.id ?? "",
+    id: editing.value?.id ?? crypto.randomUUID(),
     label: form.value.label.trim(),
     username: form.value.username.trim(),
     auth: buildAuth(),

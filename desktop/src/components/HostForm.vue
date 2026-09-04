@@ -124,7 +124,7 @@ async function createInlineGroup() {
 async function save() {
   if (!isValid.value) return;
   const host: Host = {
-    id: props.host?.id ?? "",
+    id: props.host?.id ?? crypto.randomUUID(),
     label: form.value.label.trim(),
     hostname: form.value.hostname.trim(),
     port: form.value.port,
