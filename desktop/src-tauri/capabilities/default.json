@@ -7,6 +7,14 @@
     "core:default",
     "shell:allow-open",
     "dialog:default",
-    "os:default"
+    "os:default",
+    "updater:default",
+    "updater:allow-check",
+    "updater:allow-download",
+    "updater:allow-install",
+    "updater:allow-download-and-install",
+    "process:default",
+    "process:allow-restart",
+    "process:allow-exit"
   ]
 }

@@ -494,3 +494,89 @@ pub async fn list_sessions(state: State<'_, Arc<AppState>>) -> ApiResult<Vec<Str
     sessions.extend(locals.keys().cloned());
     Ok(sessions)
 }
+
+// ============================================================
+// Updater
+// ============================================================
+
+use serde::Serialize;
+
+#[derive(Debug, Serialize)]
+pub struct UpdateInfo {
+    pub available: bool,
+    pub version: String,
+    pub current_version: String,
+    pub date: Option<String>,
+    pub body: Option<String>,
+}
+
+/// Check for updates. Returns update info if an update is available.
+#[tauri::command]
+pub async fn check_for_updates(
+    app: AppHandle,
+) -> ApiResult<UpdateInfo> {
+    use tauri_plugin_updater::UpdaterExt;
+
+    let updater = app.updater().map_err(|e| e.to_string())?;
+    let current = app.package_info().version.to_string();
+
+    match updater.check().await {
+        Ok(Some(update)) => Ok(UpdateInfo {
+            available: true,
+            version: update.version.clone(),
+            current_version: current,
+            date: update.date.map(|d| d.to_string()),
+            body: update.body.clone(),
+        }),
+        Ok(None) => Ok(UpdateInfo {
+            available: false,
+            version: current.clone(),
+            current_version: current,
+            date: None,
+            body: None,
+        }),
+        Err(e) => Err(e.to_string()),
+    }
+}
+
+/// Download and install the update, then restart the app.
+/// Emits "update-progress" events with download progress.
+#[tauri::command]
+pub async fn install_update(
+    app: AppHandle,
+) -> ApiResult<()> {
+    use tauri_plugin_updater::UpdaterExt;
+
+    let updater = app.updater().map_err(|e| e.to_string())?;
+
+    let update = updater
+        .check()
+        .await
+        .map_err(|e| e.to_string())?
+        .ok_or("No update available")?;
+
+    // Download and install
+    update
+        .download_and_install(
+            |chunk_length, content_length| {
+                let _ = app.emit(
+                    "update-progress",
+                    serde_json::json!({
+                        "chunk_length": chunk_length,
+                        "content_length": content_length,
+                    }),
+                );
+            },
+            || {
+                let _ = app.emit("update-extracting", serde_json::json!({}));
+            },
+        )
+        .await
+        .map_err(|e| e.to_string())?;
+
+    // Restart the app to apply the update
+    app.request_restart();
+
+    Ok(())
+}
+

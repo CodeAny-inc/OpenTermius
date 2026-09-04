@@ -13,6 +13,7 @@ import VaultView from "./components/VaultView.vue";
 import KnownHostsView from "./components/KnownHostsView.vue";
 import WorkspaceView from "./components/WorkspaceView.vue";
 import CommandPalette from "./components/CommandPalette.vue";
+import UpdateBanner from "./components/UpdateBanner.vue";
 
 const vault = useVaultStore();
 const hosts = useHostsStore();
@@ -78,5 +79,6 @@ onUnmounted(() => {
       @close="commandPaletteOpen = false"
       @navigate="activeView = $event; commandPaletteOpen = false"
     />
+    <UpdateBanner />
   </div>
 </template>

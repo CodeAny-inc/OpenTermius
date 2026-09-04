@@ -5,6 +5,8 @@ mod state;
 
 use state::AppState;
 use tauri::Manager;
+#[cfg(not(debug_assertions))]
+use tauri::Emitter;
 
 fn main() {
     tracing_subscriber::fmt()
@@ -18,6 +20,8 @@ fn main() {
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_os::init())
+        .plugin(tauri_plugin_process::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(|app| {
             let app_data = app
                 .path()
@@ -25,6 +29,17 @@ fn main() {
                 .expect("no app data dir");
             let state = AppState::init(app.handle(), app_data);
             app.manage(state);
+
+            // Check for updates on startup (non-blocking, silent)
+            // Only in release builds — skip in dev to avoid noise
+            #[cfg(not(debug_assertions))]
+            {
+                let handle = app.handle().clone();
+                tauri::async_runtime::spawn(async move {
+                    check_for_updates_silent(handle).await;
+                });
+            }
+
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -64,7 +79,50 @@ fn main() {
             commands::session_resize,
             commands::close_session,
             commands::list_sessions,
+            // updater
+            commands::check_for_updates,
+            commands::install_update,
         ])
         .run(tauri::generate_context!())
         .expect("error while running OpenTermius");
+}
+
+/// Silent background check — emits an event to the frontend if an update
+/// is available, so the UI can show a banner. Does not auto-install.
+#[cfg(not(debug_assertions))]
+async fn check_for_updates_silent(app: tauri::AppHandle) {
+    use tauri_plugin_updater::UpdaterExt;
+
+    let updater = match app.updater() {
+        Ok(u) => u,
+        Err(e) => {
+            tracing::warn!("updater not available: {e}");
+            return;
+        }
+    };
+
+    match updater.check().await {
+        Ok(Some(update)) => {
+            tracing::info!(
+                "update available: v{} (current: {})",
+                update.version,
+                app.package_info().version
+            );
+            // Emit event so the frontend can show an update banner
+            let _ = app.emit("update-available", serde_json::json!({
+                "version": update.version,
+                "date": update.date,
+                "body": update.body,
+            }));
+            // Stash the update object in app state for later install
+            // (We can't store it directly, so the frontend will re-check
+            //  via the check_for_updates command when the user clicks "Update")
+        }
+        Ok(None) => {
+            tracing::debug!("no update available");
+        }
+        Err(e) => {
+            tracing::warn!("update check failed: {e}");
+        }
+    }
 }
