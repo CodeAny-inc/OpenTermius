@@ -60,7 +60,10 @@ function close() {
     </div>
     <div
       class="flex-shrink-0 bg-border transition-colors duration-100 hover:bg-ring/50"
-      :class="node.direction === 'horizontal' ? 'w-px cursor-col-resize' : 'h-px cursor-row-resize'"
+      :class="[
+        node.direction === 'horizontal' ? 'w-1 cursor-col-resize' : 'h-1 cursor-row-resize',
+        dragging ? 'bg-ring' : '',
+      ]"
       @mousedown="startDrag"
     ></div>
     <div class="flex-1 overflow-hidden min-w-[50px] min-h-[50px]" :style="{ flex: 1 - node.ratio }">
