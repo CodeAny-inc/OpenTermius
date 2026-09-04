@@ -1,5 +1,6 @@
 use opentermius_core::known_hosts::KnownHosts;
 use opentermius_core::session::SessionManager;
+use opentermius_core::sftp::SftpManager;
 use opentermius_core::store::Store;
 use opentermius_core::vault::Vault;
 use std::path::PathBuf;
@@ -16,6 +17,7 @@ pub struct AppState {
     pub known_hosts: Arc<Mutex<KnownHosts>>,
     pub passphrase: Mutex<Option<zeroize::Zeroizing<String>>>,
     pub sessions: Arc<SessionManager>,
+    pub sftp: Arc<SftpManager>,
     pub local_terminals: Mutex<std::collections::HashMap<String, LocalTerminal>>,
     pub app_data_dir: PathBuf,
 }
@@ -24,23 +26,7 @@ pub struct AppState {
 pub struct LocalTerminal {
     pub writer: Box<dyn std::io::Write + Send>,
     pub master: Box<dyn portable_pty::MasterPty + Send>,
-    pub child: Box<dyn portable_pty::Child + Send + Sync>,
-}
-
-impl LocalTerminal {
-    /// Kill the child process and wait for it to exit.
-    pub fn kill(&mut self) {
-        let _ = self.child.kill();
-        let _ = self.child.wait();
-    }
-}
-
-impl Drop for LocalTerminal {
-    fn drop(&mut self) {
-        // Ensure the child process is terminated when the terminal is dropped
-        let _ = self.child.kill();
-        let _ = self.child.wait();
-    }
+    pub _child: Box<dyn portable_pty::Child + Send + Sync>,
 }
 
 impl AppState {
@@ -74,6 +60,7 @@ impl AppState {
         });
 
         let sessions = Arc::new(SessionManager::new(data_callback, close_callback));
+        let sftp = Arc::new(SftpManager::new());
 
         Arc::new(Self {
             store: Mutex::new(store),
@@ -81,6 +68,7 @@ impl AppState {
             known_hosts: Arc::new(Mutex::new(known_hosts)),
             passphrase: Mutex::new(None),
             sessions,
+            sftp,
             local_terminals: Mutex::new(std::collections::HashMap::new()),
             app_data_dir: app_data,
         })

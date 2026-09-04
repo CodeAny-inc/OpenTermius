@@ -21,6 +21,7 @@ pub mod identity;
 pub mod keys;
 pub mod known_hosts;
 pub mod session;
+pub mod sftp;
 pub mod store;
 pub mod vault;
 pub mod workspace;

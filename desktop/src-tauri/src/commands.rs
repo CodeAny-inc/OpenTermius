@@ -2,6 +2,7 @@ use crate::state::{AppState, LocalTerminal};
 use opentermius_core::host::{AuthMethod, Host, HostGroup};
 use opentermius_core::identity::Identity;
 use opentermius_core::keys::{generate_ed25519, parse_openssh_private, KeyMeta};
+use opentermius_core::sftp::SftpEntry;
 use opentermius_core::workspace::Workspace;
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter, State};
@@ -423,13 +424,7 @@ pub async fn create_local_terminal(
     });
 
     let mut cmd = CommandBuilder::new(&shell);
-    // Run as a login shell for proper environment setup
-    cmd.arg("-l");
     cmd.env("TERM", "xterm-256color");
-    // Set a reasonable working directory
-    if let Some(home) = std::env::var_os("HOME") {
-        cmd.cwd(home);
-    }
 
     let child = pair
         .slave
@@ -451,8 +446,6 @@ pub async fn create_local_terminal(
     // Drop the slave so the child process owns the only slave fd.
     // On Unix this is the correct pattern — the child has its own copy.
     drop(pair.slave);
-
-    tracing::info!("local terminal created: session={session_id}, shell={shell}");
 
     // Spawn a reading thread that emits data events
     let app_handle = app.clone();
@@ -476,13 +469,9 @@ pub async fn create_local_terminal(
                     std::thread::sleep(std::time::Duration::from_millis(10));
                     continue;
                 }
-                Err(ref e) => {
-                    tracing::warn!("local terminal read error: {e}");
-                    break;
-                }
+                Err(_) => break,
             }
         }
-        tracing::info!("local terminal reader ended: session={sid}");
         let _ = app_handle.emit(
             "session-closed",
             crate::state::SessionClosedEvent {
@@ -500,7 +489,7 @@ pub async fn create_local_terminal(
         LocalTerminal {
             writer,
             master,
-            child,
+            _child: child,
         },
     );
 
@@ -565,12 +554,9 @@ pub async fn close_session(
     if state.sessions.list().await.contains(&session_id) {
         return state.sessions.close(&session_id).await.map_err(err);
     }
-    // Try local terminal — kill the child process
+    // Try local terminal
     let mut locals = state.local_terminals.lock().await;
-    if let Some(mut term) = locals.remove(&session_id) {
-        term.kill();
-        tracing::info!("local terminal closed: session={session_id}");
-    }
+    locals.remove(&session_id);
     Ok(())
 }
 
@@ -580,6 +566,163 @@ pub async fn list_sessions(state: State<'_, Arc<AppState>>) -> ApiResult<Vec<Str
     let locals = state.local_terminals.lock().await;
     sessions.extend(locals.keys().cloned());
     Ok(sessions)
+}
+
+// ============================================================
+// SFTP (File Browser)
+// ============================================================
+
+#[tauri::command]
+pub async fn sftp_connect(
+    state: State<'_, Arc<AppState>>,
+    session_id: String,
+    host: Host,
+    password: Option<String>,
+) -> ApiResult<()> {
+    let passphrase = {
+        let pw = state.passphrase.lock().await;
+        pw.as_ref().map(|p| p.to_string())
+    };
+
+    let identity = if let Some(identity_id) = host.identity_id {
+        let store = state.store.lock().await;
+        store
+            .data()
+            .identities
+            .iter()
+            .find(|i| i.id == identity_id)
+            .cloned()
+    } else {
+        None
+    };
+
+    let needs_vault = match identity.as_ref() {
+        Some(id) => matches!(id.auth, AuthMethod::PublicKey),
+        None => matches!(host.auth, AuthMethod::PublicKey),
+    };
+    let vault = state.vault.lock().await;
+    let vault_ref = if needs_vault { Some(&*vault) } else { None };
+    let known_hosts = state.known_hosts.clone();
+
+    state
+        .sftp
+        .connect(
+            session_id,
+            &host,
+            identity.as_ref(),
+            known_hosts,
+            vault_ref,
+            passphrase.as_deref(),
+            password.as_deref(),
+        )
+        .await
+        .map_err(err)
+}
+
+#[tauri::command]
+pub async fn sftp_list_dir(
+    state: State<'_, Arc<AppState>>,
+    session_id: String,
+    path: String,
+) -> ApiResult<Vec<SftpEntry>> {
+    state.sftp.list_dir(&session_id, &path).await.map_err(err)
+}
+
+#[tauri::command]
+pub async fn sftp_canonicalize(
+    state: State<'_, Arc<AppState>>,
+    session_id: String,
+    path: String,
+) -> ApiResult<String> {
+    state
+        .sftp
+        .canonicalize(&session_id, &path)
+        .await
+        .map_err(err)
+}
+
+#[tauri::command]
+pub async fn sftp_read_file(
+    state: State<'_, Arc<AppState>>,
+    session_id: String,
+    path: String,
+) -> ApiResult<Vec<u8>> {
+    state.sftp.read_file(&session_id, &path).await.map_err(err)
+}
+
+#[tauri::command]
+pub async fn sftp_write_file(
+    state: State<'_, Arc<AppState>>,
+    session_id: String,
+    path: String,
+    data: Vec<u8>,
+) -> ApiResult<()> {
+    state
+        .sftp
+        .write_file(&session_id, &path, &data)
+        .await
+        .map_err(err)
+}
+
+#[tauri::command]
+pub async fn sftp_create_dir(
+    state: State<'_, Arc<AppState>>,
+    session_id: String,
+    path: String,
+) -> ApiResult<()> {
+    state
+        .sftp
+        .create_dir(&session_id, &path)
+        .await
+        .map_err(err)
+}
+
+#[tauri::command]
+pub async fn sftp_remove_file(
+    state: State<'_, Arc<AppState>>,
+    session_id: String,
+    path: String,
+) -> ApiResult<()> {
+    state
+        .sftp
+        .remove_file(&session_id, &path)
+        .await
+        .map_err(err)
+}
+
+#[tauri::command]
+pub async fn sftp_remove_dir(
+    state: State<'_, Arc<AppState>>,
+    session_id: String,
+    path: String,
+) -> ApiResult<()> {
+    state
+        .sftp
+        .remove_dir(&session_id, &path)
+        .await
+        .map_err(err)
+}
+
+#[tauri::command]
+pub async fn sftp_rename(
+    state: State<'_, Arc<AppState>>,
+    session_id: String,
+    old_path: String,
+    new_path: String,
+) -> ApiResult<()> {
+    state
+        .sftp
+        .rename(&session_id, &old_path, &new_path)
+        .await
+        .map_err(err)
+}
+
+#[tauri::command]
+pub async fn sftp_close(
+    state: State<'_, Arc<AppState>>,
+    session_id: String,
+) -> ApiResult<()> {
+    state.sftp.close(&session_id).await.map_err(err)
 }
 
 // ============================================================
@@ -721,45 +864,6 @@ pub async fn check_with_prerelease_endpoint(
     };
 
     tracing::info!("updater: using latest.json from {json_url}");
-
-    // Fetch the latest.json and check if platforms is empty before passing
-    // to the updater. This gives a clearer error than the updater's generic
-    // "none of the fallback platforms were found" message.
-    let client = reqwest::Client::builder()
-        .user_agent("opentermius-updater")
-        .build()
-        .map_err(|e| format!("http client: {e}"))?;
-    let manifest_resp = client
-        .get(&json_url)
-        .send()
-        .await
-        .map_err(|e| format!("fetch latest.json: {e}"))?;
-    if !manifest_resp.status().is_success() {
-        return Err(format!(
-            "latest.json returned {}",
-            manifest_resp.status()
-        ));
-    }
-    let manifest_text = manifest_resp
-        .text()
-        .await
-        .map_err(|e| format!("read latest.json: {e}"))?;
-    let manifest: serde_json::Value = serde_json::from_str(&manifest_text)
-        .map_err(|e| format!("parse latest.json: {e}"))?;
-    let platforms = manifest
-        .get("platforms")
-        .and_then(|p| p.as_object())
-        .map(|m| m.len())
-        .unwrap_or(0);
-    if platforms == 0 {
-        tracing::warn!("updater: latest.json has empty platforms, skipping update check");
-        return Err(
-            "Update manifest has no platform entries. \
-             The release may still be building — try again in a few minutes."
-                .to_string(),
-        );
-    }
-    tracing::info!("updater: latest.json has {platforms} platform(s)");
 
     let parsed_url: url::Url = json_url
         .parse()

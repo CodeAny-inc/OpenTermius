@@ -4,6 +4,7 @@ import {
   Terminal,
   KeyRound,
   FolderOpen,
+  HardDrive,
   ShieldCheck,
   Vault,
   Search,
@@ -38,6 +39,7 @@ const navItems = [
   { id: "hosts", label: "Hosts", icon: Server },
   { id: "identities", label: "Identities", icon: UserCircle },
   { id: "terminal", label: "Terminal", icon: Terminal },
+  { id: "files", label: "Files", icon: HardDrive },
   { id: "keys", label: "Keys", icon: KeyRound },
   { id: "workspaces", label: "Workspaces", icon: FolderOpen },
   { id: "known-hosts", label: "Known Hosts", icon: ShieldCheck },
@@ -51,7 +53,6 @@ function navigate(id: string) {
 </script>
 
 <template>
-  <!-- Mobile overlay backdrop -->
   <Transition
     enter-active-class="transition-opacity duration-140"
     enter-from-class="opacity-0"
@@ -70,23 +71,19 @@ function navigate(id: string) {
     :class="cn(
       'z-50',
       ui.sidebarCollapsed ? 'w-[52px] min-w-[52px]' : 'w-[252px] min-w-[196px]',
-      // Mobile: fixed overlay
       'fixed inset-y-0 left-0 md:fixed md:inset-y-auto md:left-auto',
       ui.mobileSidebarOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0',
     )"
   >
-    <!-- Header -->
     <div class="flex h-11 items-center gap-2 border-b border-sidebar-border" :class="ui.sidebarCollapsed ? 'justify-center px-1' : 'px-3'">
       <span v-if="!ui.sidebarCollapsed" class="text-[13px] font-semibold tracking-tight text-sidebar-foreground">OpenTermius</span>
       <Server v-else class="size-4 text-sidebar-foreground" :stroke-width="1.75" />
-      <!-- Mobile close button -->
       <button
         class="ml-auto flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-sidebar-accent md:hidden"
         @click="ui.closeMobileSidebar()"
       >
         <X class="size-4" :stroke-width="1.75" />
       </button>
-      <!-- Collapse toggle (desktop only) -->
       <button
         v-if="!ui.sidebarCollapsed"
         class="ml-auto hidden md:flex h-6 w-6 items-center justify-center rounded text-muted-foreground hover:bg-sidebar-accent transition-colors duration-100"
@@ -97,7 +94,6 @@ function navigate(id: string) {
       </button>
     </div>
 
-    <!-- Quick actions -->
     <div class="flex flex-col gap-0.5 px-2 pt-2" :class="ui.sidebarCollapsed ? 'px-1.5' : ''">
       <button
         class="flex h-9 items-center gap-2 rounded-md text-[13px] text-sidebar-foreground transition-colors duration-100 hover:bg-sidebar-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
@@ -125,7 +121,6 @@ function navigate(id: string) {
       </button>
     </div>
 
-    <!-- Navigation -->
     <nav class="flex flex-col gap-0.5 px-2 pt-3" :class="ui.sidebarCollapsed ? 'px-1.5' : ''">
       <button
         v-for="item in navItems"
@@ -153,7 +148,6 @@ function navigate(id: string) {
             {{ tabCount }}
           </span>
         </template>
-        <!-- Collapsed: show badge as dot -->
         <span
           v-if="ui.sidebarCollapsed && item.id === 'terminal' && tabCount > 0"
           class="absolute top-1 right-1 size-1.5 rounded-full bg-primary"
@@ -161,10 +155,8 @@ function navigate(id: string) {
       </button>
     </nav>
 
-    <!-- Spacer -->
     <div class="flex-1"></div>
 
-    <!-- Expand button when collapsed -->
     <div v-if="ui.sidebarCollapsed" class="px-1.5 pb-1.5">
       <button
         class="flex h-8 w-full items-center justify-center rounded-md text-muted-foreground hover:bg-sidebar-accent transition-colors duration-100"
@@ -175,7 +167,6 @@ function navigate(id: string) {
       </button>
     </div>
 
-    <!-- Footer: Vault status + Settings -->
     <div class="border-t border-sidebar-border px-2 py-2 flex flex-col gap-1" :class="ui.sidebarCollapsed ? 'px-1.5' : ''">
       <button
         class="flex h-10 w-full items-center gap-2 rounded-md text-[13px] text-sidebar-foreground transition-colors duration-100 hover:bg-sidebar-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
@@ -224,7 +215,6 @@ function navigate(id: string) {
             {{ update.version }}
           </span>
         </template>
-        <!-- Collapsed: show update dot -->
         <span
           v-if="ui.sidebarCollapsed && update.available"
           class="absolute top-1 right-1 size-1.5 rounded-full bg-primary"

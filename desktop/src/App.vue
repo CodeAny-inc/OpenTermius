@@ -17,6 +17,7 @@ import KeyManager from "./components/KeyManager.vue";
 import VaultView from "./components/VaultView.vue";
 import KnownHostsView from "./components/KnownHostsView.vue";
 import WorkspaceView from "./components/WorkspaceView.vue";
+import SftpBrowser from "./components/SftpBrowser.vue";
 import SettingsView from "./components/SettingsView.vue";
 import CommandPalette from "./components/CommandPalette.vue";
 import UpdateModal from "./components/UpdateModal.vue";
@@ -39,7 +40,6 @@ const commandPaletteOpen = ref(false);
 
 const showMainContent = computed(() => activeView.value === "terminal");
 
-// Show update modal automatically when an update is detected (unless dismissed)
 watch(
   () => update.shouldNotify,
   (notify) => {
@@ -50,7 +50,6 @@ watch(
 );
 
 function handleKeydown(e: KeyboardEvent) {
-  // Exit fullscreen on Escape
   if (e.key === "Escape" && ui.fullscreenPaneId) {
     e.preventDefault();
     ui.exitFullscreen();
@@ -85,7 +84,6 @@ onMounted(async () => {
   await identities.load();
   await workspaces.load();
 
-  // Check for updates on startup (non-blocking)
   await update.registerListeners();
   await update.check();
   if (update.shouldNotify) {
@@ -110,14 +108,12 @@ onUnmounted(() => {
     />
 
     <main class="flex-1 flex flex-col overflow-hidden min-w-0">
-      <!-- Mobile menu button (visible on small screens) -->
       <button
         class="flex h-9 w-9 items-center justify-center rounded-md text-muted-foreground hover:bg-muted transition-colors duration-100 md:hidden absolute top-1 left-1 z-30"
         @click="ui.openMobileSidebar()"
       >
         <Menu class="size-4" :stroke-width="1.75" />
       </button>
-      <!-- TerminalArea uses v-show to preserve state across view switches -->
       <TerminalArea v-show="showMainContent" />
       <HostList v-if="activeView === 'hosts'" @switch-view="activeView = $event" />
       <IdentityManager v-else-if="activeView === 'identities'" />
@@ -125,6 +121,7 @@ onUnmounted(() => {
       <VaultView v-else-if="activeView === 'vault'" />
       <KnownHostsView v-else-if="activeView === 'known-hosts'" />
       <WorkspaceView v-else-if="activeView === 'workspaces'" />
+      <SftpBrowser v-else-if="activeView === 'files'" />
       <SettingsView v-else-if="activeView === 'settings'" />
     </main>
     <CommandPalette

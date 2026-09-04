@@ -65,6 +65,47 @@ export function onSessionClosed(cb: (e: SessionClosedEvent) => void): Promise<Un
   return listen<SessionClosedEvent>("session-closed", (event) => cb(event.payload));
 }
 
+export interface SftpEntry {
+  name: string;
+  long_name: string;
+  is_dir: boolean;
+  is_file: boolean;
+  is_symlink: boolean;
+  size: number;
+  modified: number | null;
+  permissions: number | null;
+}
+
+export const sftpConnect = (
+  sessionId: string,
+  host: Host,
+  password: string | null,
+) => invoke<void>("sftp_connect", { sessionId, host, password });
+export const sftpListDir = (sessionId: string, path: string) =>
+  invoke<SftpEntry[]>("sftp_list_dir", { sessionId, path });
+export const sftpCanonicalize = (sessionId: string, path: string) =>
+  invoke<string>("sftp_canonicalize", { sessionId, path });
+export const sftpCreateDir = (sessionId: string, path: string) =>
+  invoke<void>("sftp_create_dir", { sessionId, path });
+export const sftpRemoveFile = (sessionId: string, path: string) =>
+  invoke<void>("sftp_remove_file", { sessionId, path });
+export const sftpRemoveDir = (sessionId: string, path: string) =>
+  invoke<void>("sftp_remove_dir", { sessionId, path });
+export const sftpRename = (sessionId: string, oldPath: string, newPath: string) =>
+  invoke<void>("sftp_rename", { sessionId, oldPath, newPath });
+export const sftpClose = (sessionId: string) => invoke<void>("sftp_close", { sessionId });
+export const sftpDownloadToLocal = (
+  sessionId: string,
+  remotePath: string,
+  localPath: string,
+) => invoke<void>("sftp_download_to_local", { sessionId, remotePath, localPath });
+export const sftpUploadFromLocal = (
+  sessionId: string,
+  localPath: string,
+  remotePath: string,
+  overwrite: boolean,
+) => invoke<void>("sftp_upload_from_local", { sessionId, localPath, remotePath, overwrite });
+
 export interface UpdateInfo {
   available: boolean;
   version: string;
