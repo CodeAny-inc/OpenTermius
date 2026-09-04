@@ -33,7 +33,10 @@
     ],
     "category": "DeveloperTool",
     "shortDescription": "Open-source SSH connection & key manager",
-    "longDescription": "OpenTermius is an open-source, cross-platform manager for SSH connections, keys, and known hosts. Secure-by-default: encrypted vault, OS keychain integration, TOFU host key verification."
+    "longDescription": "OpenTermius is an open-source, cross-platform manager for SSH connections, keys, and known hosts. Secure-by-default: encrypted vault, OS keychain integration, TOFU host key verification.",
+    "macOS": {
+      "signingIdentity": "-"
+    }
   },
   "plugins": {
     "updater": {
