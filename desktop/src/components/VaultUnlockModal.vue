@@ -14,7 +14,12 @@ const ui = useUiStore();
 const passphrase = ref("");
 const error = ref("");
 const loading = ref<"password" | "biometric" | null>(null);
-const inputRef = ref<HTMLInputElement | null>(null);
+
+function focusPassphraseInput() {
+  nextTick(() => {
+    document.getElementById("modal-pass")?.focus();
+  });
+}
 
 watch(
   () => ui.showVaultUnlockModal,
@@ -23,7 +28,7 @@ watch(
       passphrase.value = "";
       error.value = "";
       loading.value = null;
-      nextTick(() => inputRef.value?.focus());
+      focusPassphraseInput();
     }
   },
 );
@@ -52,7 +57,7 @@ async function submitBiometric() {
     ui.resolveVaultUnlock(true);
   } catch (e) {
     error.value = String(e);
-    nextTick(() => inputRef.value?.focus());
+    focusPassphraseInput();
   } finally {
     loading.value = null;
   }
@@ -115,7 +120,6 @@ function cancel() {
           <Label for="modal-pass">Master passphrase</Label>
           <Input
             id="modal-pass"
-            ref="inputRef"
             v-model="passphrase"
             type="password"
             placeholder="Enter master passphrase"
