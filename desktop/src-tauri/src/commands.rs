@@ -604,6 +604,14 @@ pub struct UpdateInfo {
     pub body: Option<String>,
 }
 
+#[derive(Debug, Serialize)]
+pub struct AppInfo {
+    pub name: String,
+    pub version: String,
+    pub platform: String,
+    pub arch: String,
+}
+
 /// GitHub API release representation (subset of fields we need).
 #[derive(Debug, Deserialize)]
 struct GithubRelease {
@@ -725,6 +733,18 @@ pub async fn check_with_prerelease_endpoint(
         }
     }
     result.map_err(|e| e.to_string())
+}
+
+/// Get app information (name, version, platform).
+#[tauri::command]
+pub fn get_app_info(app: AppHandle) -> AppInfo {
+    let pkg = app.package_info();
+    AppInfo {
+        name: pkg.name.clone(),
+        version: pkg.version.to_string(),
+        platform: std::env::consts::OS.to_string(),
+        arch: std::env::consts::ARCH.to_string(),
+    }
 }
 
 /// Check for updates. Returns update info if an update is available.

@@ -14,10 +14,9 @@ import KeyManager from "./components/KeyManager.vue";
 import VaultView from "./components/VaultView.vue";
 import KnownHostsView from "./components/KnownHostsView.vue";
 import WorkspaceView from "./components/WorkspaceView.vue";
+import SettingsView from "./components/SettingsView.vue";
 import CommandPalette from "./components/CommandPalette.vue";
 import UpdateBanner from "./components/UpdateBanner.vue";
-import * as api from "./api";
-import type { UpdateInfo } from "./api";
 
 const vault = useVaultStore();
 const hosts = useHostsStore();
@@ -28,13 +27,8 @@ const tabs = useTabsStore();
 
 const activeView = ref("hosts");
 const commandPaletteOpen = ref(false);
-const manualUpdateInfo = ref<api.UpdateInfo | null>(null);
 
 const showMainContent = computed(() => activeView.value === "terminal");
-
-function onSidebarUpdate(info: api.UpdateInfo) {
-  manualUpdateInfo.value = info;
-}
 
 function handleKeydown(e: KeyboardEvent) {
   const cmd = e.metaKey || e.ctrlKey;
@@ -47,7 +41,7 @@ function handleKeydown(e: KeyboardEvent) {
     tabs.newTab();
   } else if (cmd && e.key === ",") {
     e.preventDefault();
-    activeView.value = "vault";
+    activeView.value = "settings";
   } else if (e.key === "Escape" && commandPaletteOpen.value) {
     commandPaletteOpen.value = false;
   }
@@ -75,7 +69,6 @@ onUnmounted(() => {
       :tab-count="tabs.tabs.length"
       @navigate="activeView = $event"
       @open-command-palette="commandPaletteOpen = true"
-      @update-available="onSidebarUpdate"
     />
 
     <main class="flex-1 flex flex-col overflow-hidden min-w-[480px]">
@@ -86,12 +79,13 @@ onUnmounted(() => {
       <VaultView v-else-if="activeView === 'vault'" />
       <KnownHostsView v-else-if="activeView === 'known-hosts'" />
       <WorkspaceView v-else-if="activeView === 'workspaces'" />
+      <SettingsView v-else-if="activeView === 'settings'" />
     </main>
     <CommandPalette
       :open="commandPaletteOpen"
       @close="commandPaletteOpen = false"
       @navigate="activeView = $event; commandPaletteOpen = false"
     />
-    <UpdateBanner :manual-update-info="manualUpdateInfo" />
+    <UpdateBanner />
   </div>
 </template>

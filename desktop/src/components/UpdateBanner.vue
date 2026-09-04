@@ -1,12 +1,8 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, watch } from "vue";
+import { ref, onMounted, onUnmounted } from "vue";
 import * as api from "../api";
 import { Download, X, Loader2 } from "lucide-vue-next";
 import type { UnlistenFn } from "@tauri-apps/api/event";
-
-const props = defineProps<{
-  manualUpdateInfo?: api.UpdateInfo | null;
-}>();
 
 const show = ref(false);
 const updateInfo = ref<api.UpdateInfo | null>(null);
@@ -21,8 +17,6 @@ let unlistenExtracting: UnlistenFn | null = null;
 
 onMounted(async () => {
   // Check for updates FIRST, before registering event listeners.
-  // If listen() calls throw, they would prevent checkForUpdates()
-  // from running. So we do the explicit check first.
   try {
     const info = await api.checkForUpdates();
     if (info.available && !dismissed.value) {
@@ -34,7 +28,6 @@ onMounted(async () => {
   }
 
   // Register event listeners AFTER the explicit check.
-  // Wrap each in try/catch so one failing doesn't block the others.
   try {
     unlistenAvailable = await api.onUpdateAvailable((info) => {
       updateInfo.value = info;
@@ -67,15 +60,6 @@ onUnmounted(() => {
   unlistenAvailable?.();
   unlistenProgress?.();
   unlistenExtracting?.();
-});
-
-// Watch for manual update checks from the sidebar
-watch(() => props.manualUpdateInfo, (info) => {
-  if (info && info.available) {
-    updateInfo.value = info;
-    dismissed.value = false;
-    show.value = true;
-  }
 });
 
 function dismiss() {

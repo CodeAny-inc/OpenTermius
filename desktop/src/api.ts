@@ -145,6 +145,15 @@ export interface UpdateInfo {
   body: string | null;
 }
 
+export interface AppInfo {
+  name: string;
+  version: string;
+  platform: string;
+  arch: string;
+}
+
+export const getAppInfo = () => invoke<AppInfo>("get_app_info");
+
 export interface UpdateProgress {
   chunk_length: number;
   content_length: number | null;

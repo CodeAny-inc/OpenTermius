@@ -10,6 +10,7 @@ import {
   Search,
   Plus,
   UserCircle,
+  Settings,
 } from "lucide-vue-next";
 import { cn } from "../lib/cn";
 import { useTabsStore } from "../stores/tabs";
@@ -33,6 +34,7 @@ const baseCommands = [
   { id: "workspaces", label: "Go to Workspaces", icon: FolderOpen, group: "Navigation" },
   { id: "known-hosts", label: "Go to Known Hosts", icon: ShieldCheck, group: "Navigation" },
   { id: "vault", label: "Go to Vault Settings", icon: Vault, group: "Navigation" },
+  { id: "settings", label: "Go to Settings", icon: Settings, group: "Navigation" },
   { id: "new-terminal", label: "New Terminal Tab", icon: Plus, group: "Actions" },
 ];
 

@@ -11,10 +11,7 @@ import {
   Settings,
   CircleDot,
   UserCircle,
-  RefreshCw,
 } from "lucide-vue-next";
-import { ref } from "vue";
-import * as api from "../api";
 import { cn } from "../lib/cn";
 
 defineProps<{
@@ -26,27 +23,7 @@ defineProps<{
 const emit = defineEmits<{
   navigate: [string];
   "open-command-palette": [];
-  "update-available": [api.UpdateInfo];
 }>();
-
-const checkingUpdates = ref(false);
-
-async function checkForUpdates() {
-  if (checkingUpdates.value) return;
-  checkingUpdates.value = true;
-  try {
-    const info = await api.checkForUpdates();
-    if (info.available) {
-      emit("update-available", info);
-    } else {
-      alert(`You're on the latest version (v${info.current_version}).`);
-    }
-  } catch (e) {
-    alert(`Failed to check for updates: ${e}`);
-  } finally {
-    checkingUpdates.value = false;
-  }
-}
 
 const navItems = [
   { id: "hosts", label: "Hosts", icon: Server },
@@ -114,26 +91,15 @@ const navItems = [
     <!-- Spacer -->
     <div class="flex-1"></div>
 
-    <!-- Footer: Vault status + Check for updates -->
+    <!-- Footer: Vault status + Settings -->
     <div class="border-t border-sidebar-border px-2 py-2 flex flex-col gap-1">
       <button
-        class="flex h-9 w-full items-center gap-2 rounded-md px-2 text-[13px] text-sidebar-foreground transition-colors duration-100 hover:bg-sidebar-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-        :disabled="checkingUpdates"
-        @click="checkForUpdates"
-      >
-        <RefreshCw
-          class="size-3.5 text-muted-foreground"
-          :class="{ 'animate-spin': checkingUpdates }"
-          :stroke-width="1.75"
-        />
-        <span class="flex-1 text-left">{{ checkingUpdates ? "Checking..." : "Check for Updates" }}</span>
-      </button>
-      <button
         class="flex h-10 w-full items-center gap-2 rounded-md px-2 text-[13px] text-sidebar-foreground transition-colors duration-100 hover:bg-sidebar-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        :class="{ 'bg-sidebar-accent text-sidebar-accent-foreground': activeView === 'vault' }"
         @click="emit('navigate', 'vault')"
       >
         <div class="relative">
-          <Settings class="size-4 text-muted-foreground" :stroke-width="1.75" />
+          <Vault class="size-4 text-muted-foreground" :stroke-width="1.75" />
           <CircleDot
             class="absolute -right-0.5 -top-0.5 size-2"
             :class="vaultUnlocked ? 'text-green-500' : 'text-muted-foreground'"
@@ -147,6 +113,14 @@ const navItems = [
             {{ vaultUnlocked ? "Unlocked" : "Locked" }}
           </span>
         </div>
+      </button>
+      <button
+        class="flex h-9 w-full items-center gap-2 rounded-md px-2 text-[13px] text-sidebar-foreground transition-colors duration-100 hover:bg-sidebar-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        :class="{ 'bg-sidebar-accent text-sidebar-accent-foreground': activeView === 'settings' }"
+        @click="emit('navigate', 'settings')"
+      >
+        <Settings class="size-3.5 text-muted-foreground" :stroke-width="1.75" />
+        <span class="flex-1 text-left">Settings</span>
       </button>
     </div>
   </aside>

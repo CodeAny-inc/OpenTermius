@@ -90,6 +90,7 @@ fn main() {
             // file I/O
             commands::read_key_file,
             // updater
+            commands::get_app_info,
             commands::check_for_updates,
             commands::install_update,
         ])
