@@ -200,9 +200,13 @@ fi
 log "Signing update tarball..."
 
 if [[ "$DRY_RUN" == "false" ]]; then
+  # Use --private-key (string) + --password instead of --private-key-path.
+  # The latter triggers an interactive password prompt even when the key has
+  # no password, which fails in non-interactive environments (no tty).
   cd desktop
   npx @tauri-apps/cli signer sign \
-    --private-key-path "$SIGNING_KEY_PATH" \
+    --private-key "$TAURI_SIGNING_PRIVATE_KEY" \
+    --password "${TAURI_SIGNING_PRIVATE_KEY_PASSWORD:-}" \
     "$TARBALL" 2>/dev/null
   cd "$ROOT"
   ok "Signed: $(basename "$SIG_FILE")"
