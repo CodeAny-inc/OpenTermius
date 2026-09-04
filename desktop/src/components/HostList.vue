@@ -61,16 +61,17 @@ function onHostClick(host: Host) {
 
 function onHostDblClick(host: Host) {
   selectedHostId.value = host.id;
-  connectTarget.value = host;
-  showConnectDialog.value = true;
+  // Connect directly — no dialog needed
+  tabs.newTab(host);
+  emit("switch-view", "terminal");
 }
 
 function onHostKeydown(e: KeyboardEvent, host: Host) {
   if (e.key === "Enter") {
     e.preventDefault();
-    connectTarget.value = host;
     selectedHostId.value = host.id;
-    showConnectDialog.value = true;
+    tabs.newTab(host);
+    emit("switch-view", "terminal");
   } else if (e.key === "ArrowDown" || e.key === "ArrowUp") {
     e.preventDefault();
     const list = hosts.filteredHosts;
@@ -80,6 +81,12 @@ function onHostKeydown(e: KeyboardEvent, host: Host) {
       : Math.max(0, idx - 1);
     selectedHostId.value = list[nextIdx]?.id ?? null;
   }
+}
+
+function connectDirectly(host: Host) {
+  selectedHostId.value = host.id;
+  tabs.newTab(host);
+  emit("switch-view", "terminal");
 }
 
 function confirmConnect() {
@@ -257,18 +264,20 @@ function authLabel(host: Host): string {
             <UserCircle class="size-2.5 mr-0.5" :stroke-width="2" />
             Identity
           </Badge>
-          <div class="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity sm:opacity-100 sm:group-hover:opacity-100">
+          <!-- Action buttons -->
+          <div class="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity sm:opacity-0 sm:group-hover:opacity-100 touch:opacity-100">
             <button
               class="flex h-6 w-6 items-center justify-center rounded text-muted-foreground hover:bg-primary/20 hover:text-primary transition-colors duration-100"
               aria-label="Connect"
-              title="Connect"
-              @click.stop="onHostDblClick(host)"
+              title="Connect (Enter)"
+              @click.stop="connectDirectly(host)"
             >
               <Plug class="size-3" :stroke-width="1.75" />
             </button>
             <button
               class="flex h-6 w-6 items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground transition-colors duration-100 hidden sm:flex"
               aria-label="Edit host"
+              title="Edit"
               @click.stop="editHost(host)"
             >
               <Pencil class="size-3" :stroke-width="1.75" />
@@ -276,6 +285,7 @@ function authLabel(host: Host): string {
             <button
               class="flex h-6 w-6 items-center justify-center rounded text-muted-foreground hover:bg-destructive/20 hover:text-destructive transition-colors duration-100 hidden sm:flex"
               aria-label="Delete host"
+              title="Delete"
               @click.stop="deleteHost(host)"
             >
               <Trash2 class="size-3" :stroke-width="1.75" />
@@ -309,7 +319,7 @@ function authLabel(host: Host): string {
         <span class="text-foreground font-medium">{{ selectedHost.label }}</span>
         <span class="ml-2 font-mono hidden sm:inline">{{ selectedHost.username }}@{{ selectedHost.hostname }}:{{ selectedHost.port }}</span>
       </span>
-      <Button size="sm" class="shrink-0" @click="onHostDblClick(selectedHost)">
+      <Button size="sm" class="shrink-0" @click="connectDirectly(selectedHost)">
         <Plug class="size-3.5" :stroke-width="1.75" />
         <span class="hidden sm:inline">Connect</span>
       </Button>

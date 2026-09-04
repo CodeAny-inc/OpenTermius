@@ -82,6 +82,28 @@ watch(isFullscreen, () => {
   });
 });
 
+// Refit terminal when this pane's tab becomes active
+watch(
+  () => tabs.activeTabId,
+  (newActiveTabId) => {
+    if (newActiveTabId === props.tabId) {
+      nextTick(() => {
+        if (fitAddon && term) {
+          try {
+            fitAddon.fit();
+            if (currentSessionId) {
+              api.sessionResize(currentSessionId, term.cols, term.rows);
+            }
+            term.focus();
+          } catch {
+            // ignore
+          }
+        }
+      });
+    }
+  },
+);
+
 onMounted(async () => {
   if (!containerRef.value) return;
 

@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted } from "vue";
-import { useTabsStore } from "../stores/tabs";
+import { useTabsStore, collectPanes } from "../stores/tabs";
 import { useUiStore } from "../stores/ui";
-import { Plus, X, GripHorizontal } from "lucide-vue-next";
+import { Plus, X, GripHorizontal, Circle, CircleDot, TerminalSquare } from "lucide-vue-next";
 import { cn } from "../lib/cn";
 import SplitView from "./SplitView.vue";
 
@@ -23,6 +23,20 @@ function switchTab(id: string) {
 
 function closeTab(id: string) {
   tabs.closeTab(id);
+}
+
+// Check if any pane in a tab is connected
+function tabHasConnection(tabId: string): boolean {
+  const tab = tabs.tabs.find((t) => t.id === tabId);
+  if (!tab) return false;
+  return collectPanes(tab.tree).some((p) => p.connected);
+}
+
+// Count connected panes in a tab
+function tabConnectedCount(tabId: string): number {
+  const tab = tabs.tabs.find((t) => t.id === tabId);
+  if (!tab) return 0;
+  return collectPanes(tab.tree).filter((p) => p.connected).length;
 }
 
 // --- Tab drag and drop (reordering) ---
@@ -63,6 +77,14 @@ function onTabDrop(e: DragEvent, targetTabId: string) {
   onTabDragEnd();
 }
 
+// Middle-click to close tab
+function onTabMiddleClick(e: MouseEvent, tabId: string) {
+  if (e.button === 1) {
+    e.preventDefault();
+    closeTab(tabId);
+  }
+}
+
 // --- Keyboard navigation ---
 function onKeyDown(e: KeyboardEvent) {
   // Cmd/Ctrl + Arrow keys to navigate between panes
@@ -94,29 +116,43 @@ onUnmounted(() => {
 
 <template>
   <!-- Tab bar (hidden when a pane is fullscreen) -->
-  <div v-show="!ui.fullscreenPaneId" class="flex h-11 items-center gap-0.5 border-b border-border bg-sidebar px-1.5 pl-11 md:pl-1.5 overflow-x-auto">
+  <div v-show="!ui.fullscreenPaneId" class="flex h-10 items-center gap-0.5 border-b border-border bg-sidebar px-1.5 pl-11 md:pl-1.5 overflow-x-auto scrollbar-thin">
     <div
       v-for="tab in tabs.tabs"
       :key="tab.id"
-      class="group flex h-8 items-center gap-1.5 rounded-md px-2 sm:px-2.5 text-[12px] cursor-pointer transition-colors duration-100 relative shrink-0"
+      class="group flex h-7 items-center gap-1.5 rounded-md px-2 sm:px-2.5 text-[12px] cursor-pointer transition-all duration-100 relative shrink-0"
       :class="cn(
         tab.id === tabs.activeTabId
-          ? 'bg-background text-foreground'
+          ? 'bg-background text-foreground shadow-sm'
           : 'text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground',
         dragOverTabId === tab.id && draggedTabId !== tab.id && 'ring-2 ring-primary ring-inset',
         draggedTabId === tab.id && 'opacity-50',
       )"
       draggable="true"
       @click="switchTab(tab.id)"
+      @mousedown="onTabMiddleClick($event, tab.id)"
       @dragstart="onTabDragStart($event, tab.id)"
       @dragend="onTabDragEnd"
       @dragover="onTabDragOver($event, tab.id)"
       @drop="onTabDrop($event, tab.id)"
     >
-      <GripHorizontal class="size-3 text-muted-foreground/40 opacity-0 group-hover:opacity-100 transition-opacity hidden sm:block" :stroke-width="1.75" />
+      <GripHorizontal class="size-3 text-muted-foreground/40 opacity-0 group-hover:opacity-100 transition-opacity hidden sm:block shrink-0" :stroke-width="1.75" />
+      <!-- Connection status dot -->
+      <CircleDot
+        v-if="tabHasConnection(tab.id)"
+        class="size-2.5 text-green-500 shrink-0"
+        :stroke-width="0"
+        fill="currentColor"
+      />
+      <Circle
+        v-else
+        class="size-2.5 text-muted-foreground/50 shrink-0"
+        :stroke-width="1.75"
+      />
       <span class="truncate max-w-[80px] sm:max-w-[120px]">{{ tab.title }}</span>
+      <span v-if="tabConnectedCount(tab.id) > 1" class="text-[10px] text-muted-foreground/60 shrink-0">{{ tabConnectedCount(tab.id) }}</span>
       <button
-        class="opacity-0 group-hover:opacity-100 transition-opacity rounded p-0.5 hover:bg-muted"
+        class="opacity-0 group-hover:opacity-100 transition-opacity rounded p-0.5 hover:bg-muted shrink-0"
         @click.stop="closeTab(tab.id)"
         aria-label="Close tab"
       >
@@ -128,21 +164,30 @@ onUnmounted(() => {
         class="flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-sidebar-accent hover:text-foreground transition-colors duration-100"
         @click="newTab"
         aria-label="New tab"
+        title="New tab (Ctrl+N)"
       >
         <Plus class="size-3.5" :stroke-width="1.75" />
       </button>
     </div>
   </div>
 
-  <!-- Terminal area -->
+  <!-- Terminal area — render ALL tabs with v-show to keep sessions alive -->
   <div class="flex-1 relative overflow-hidden bg-black">
-    <div v-if="tabs.activeTab" class="w-full h-full">
-      <SplitView :node="tabs.activeTab.tree" :tab-id="tabs.activeTab.id" />
+    <div
+      v-for="tab in tabs.tabs"
+      :key="tab.id"
+      v-show="tab.id === tabs.activeTabId"
+      class="absolute inset-0"
+    >
+      <SplitView :node="tab.tree" :tab-id="tab.id" />
     </div>
-    <div v-else class="flex flex-col items-center justify-center h-full gap-3 text-muted-foreground">
-      <p class="text-[14px]">No active terminal</p>
+    <div v-if="tabs.tabs.length === 0" class="flex flex-col items-center justify-center h-full gap-4 text-muted-foreground">
+      <div class="flex flex-col items-center gap-3">
+        <TerminalSquare class="size-12 text-muted-foreground/30" :stroke-width="1.5" />
+        <p class="text-[14px]">No active terminal</p>
+      </div>
       <button
-        class="inline-flex h-8 items-center gap-1.5 rounded-md bg-primary px-3 text-[13px] font-medium text-primary-foreground hover:bg-primary/90 transition-colors duration-100"
+        class="inline-flex h-8 items-center gap-1.5 rounded-md bg-primary px-4 text-[13px] font-medium text-primary-foreground hover:bg-primary/90 transition-colors duration-100"
         @click="newTab"
       >
         <Plus class="size-3.5" :stroke-width="1.75" />
