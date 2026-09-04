@@ -5,6 +5,32 @@ import VaultView from "./VaultView.vue";
 import { useVaultStore } from "../stores/vault";
 
 describe("VaultView biometric settings", () => {
+  it("shows a startup Keychain error when biometric state cannot be reconciled", async () => {
+    const pinia = createPinia();
+    setActivePinia(pinia);
+    const vault = useVaultStore();
+
+    vault.initialized = true;
+    vault.unlocked = false;
+    vault.biometricAvailable = true;
+    vault.biometricEnabled = false;
+
+    vi.spyOn(vault, "checkStatus").mockImplementation(async () => {
+      vault.error = "Error: Keychain unavailable";
+    });
+
+    const wrapper = mount(VaultView, {
+      global: {
+        plugins: [pinia],
+      },
+    });
+    await flushPromises();
+
+    expect(wrapper.text()).toContain("Error: Keychain unavailable");
+
+    wrapper.unmount();
+  });
+
   it("shows the Keychain error when disabling biometric unlock fails", async () => {
     const pinia = createPinia();
     setActivePinia(pinia);

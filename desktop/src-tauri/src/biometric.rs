@@ -23,6 +23,7 @@ mod macos {
     use core_foundation_sys::base::{CFTypeRef, OSStatus};
     use core_foundation_sys::string::CFStringRef;
     use objc2_local_authentication::{LAContext, LAPolicy};
+    use security_framework::access_control::{ProtectionMode, SecAccessControl};
     use security_framework::base::Error;
     use security_framework::passwords::{self, AccessControlOptions, PasswordOptions};
     use security_framework_sys::base::{errSecAuthFailed, errSecItemNotFound, errSecSuccess};
@@ -117,8 +118,23 @@ mod macos {
         // If the subsequent add fails, no working credential has been removed.
         delete_if_present()?;
 
+        // Build the access-control object explicitly instead of using
+        // PasswordOptions::set_access_control_options(), which unwraps ACL
+        // creation internally. The ThisDeviceOnly accessibility class prevents
+        // the raw vault passphrase from migrating to another device via backup.
+        let access_control = SecAccessControl::create_with_protection(
+            Some(ProtectionMode::AccessibleWhenUnlockedThisDeviceOnly),
+            AccessControlOptions::BIOMETRY_CURRENT_SET.bits(),
+        )
+        .map_err(|e| {
+            format!(
+                "failed to create Touch ID access control: {}",
+                format_keychain_error(e)
+            )
+        })?;
+
         let mut options = password_options();
-        options.set_access_control_options(AccessControlOptions::BIOMETRY_CURRENT_SET);
+        options.set_access_control(access_control);
 
         passwords::set_generic_password_options(passphrase.as_bytes(), options)
             .map_err(format_keychain_error)

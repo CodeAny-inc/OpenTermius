@@ -25,6 +25,8 @@ const biometricLoading = ref(false);
 const enableBiometricMode = ref(false);
 const biometricPassphrase = ref("");
 
+const displayRuntimeError = computed(() => error.value || vault.error || "");
+
 onMounted(async () => {
   await vault.checkStatus();
   // If biometric is enabled, try to auto-unlock on mount
@@ -193,7 +195,7 @@ const showBiometricButton = computed(
               @keydown.enter="unlock"
             />
           </FormGroup>
-          <p v-if="error" class="text-[12px] text-destructive">{{ error }}</p>
+          <p v-if="displayRuntimeError" class="text-[12px] text-destructive">{{ displayRuntimeError }}</p>
           <Button @click="unlock">
             <Unlock class="size-3.5" :stroke-width="1.75" />
             Unlock
@@ -214,6 +216,10 @@ const showBiometricButton = computed(
               <span class="text-[13px] font-medium">Touch ID / Biometric Unlock</span>
             </div>
 
+            <p v-if="displayRuntimeError" class="text-[12px] text-destructive mb-3">
+              {{ displayRuntimeError }}
+            </p>
+
             <!-- Biometric enabled -->
             <template v-if="vault.biometricEnabled">
               <p class="text-[12px] text-muted-foreground mb-3">
@@ -221,7 +227,6 @@ const showBiometricButton = computed(
                 Biometric unlock is enabled. You can unlock the vault with Touch ID
                 instead of typing your passphrase.
               </p>
-              <p v-if="error" class="text-[12px] text-destructive mb-3">{{ error }}</p>
               <Button variant="outline" size="sm" @click="disableBiometric">
                 Disable biometric unlock
               </Button>
@@ -247,7 +252,6 @@ const showBiometricButton = computed(
                     @keydown.enter="enableBiometric"
                   />
                 </FormGroup>
-                <p v-if="error" class="text-[12px] text-destructive">{{ error }}</p>
                 <div class="flex items-center gap-2">
                   <Button size="sm" @click="enableBiometric">
                     <Fingerprint class="size-3.5" :stroke-width="1.75" />
