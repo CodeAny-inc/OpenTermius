@@ -2,30 +2,6 @@ import { defineStore } from "pinia";
 import { ref, computed } from "vue";
 import * as api from "../api";
 
-const BIOMETRIC_ENABLED_KEY = "opentermius-biometric-enabled";
-
-function loadBiometricEnabled(): boolean {
-  try {
-    return localStorage.getItem(BIOMETRIC_ENABLED_KEY) === "true";
-  } catch {
-    return false;
-  }
-}
-
-function saveBiometricEnabled(enabled: boolean) {
-  try {
-    if (enabled) {
-      localStorage.setItem(BIOMETRIC_ENABLED_KEY, "true");
-    } else {
-      localStorage.removeItem(BIOMETRIC_ENABLED_KEY);
-    }
-  } catch {
-    // The backend credential remains authoritative; this marker is only used
-    // to decide whether to offer/attempt biometric unlock without probing the
-    // protected credential and triggering an authentication prompt.
-  }
-}
-
 export const useVaultStore = defineStore("vault", () => {
   const initialized = ref(false);
   const unlocked = ref(false);
@@ -39,10 +15,23 @@ export const useVaultStore = defineStore("vault", () => {
   );
 
   async function checkStatus() {
+    error.value = null;
     initialized.value = await api.vaultIsInitialized();
     unlocked.value = await api.isVaultUnlocked();
     biometricAvailable.value = await api.biometricAvailable();
-    biometricEnabled.value = biometricAvailable.value && loadBiometricEnabled();
+    biometricEnabled.value = false;
+
+    if (biometricAvailable.value) {
+      try {
+        // The protected Keychain item is the source of truth. This backend
+        // query is explicitly non-interactive and does not show Touch ID UI.
+        biometricEnabled.value = await api.biometricPassphraseStored();
+      } catch (e) {
+        // Fail closed: never advertise biometric unlock if the Keychain state
+        // cannot be established reliably.
+        error.value = String(e);
+      }
+    }
   }
 
   async function initialize(passphrase: string) {
@@ -87,7 +76,6 @@ export const useVaultStore = defineStore("vault", () => {
     try {
       await api.storeBiometricPassphrase(passphrase);
       biometricEnabled.value = true;
-      saveBiometricEnabled(true);
     } catch (e) {
       error.value = String(e);
       throw e;
@@ -99,7 +87,6 @@ export const useVaultStore = defineStore("vault", () => {
     try {
       await api.clearBiometricPassphrase();
       biometricEnabled.value = false;
-      saveBiometricEnabled(false);
     } catch (e) {
       error.value = String(e);
       throw e;

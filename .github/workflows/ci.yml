@@ -21,6 +21,14 @@ jobs:
       - name: Cargo test
         run: cargo test -p opentermius-core || true
 
+  macos-rust-check:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Cargo check (macOS)
+        run: cargo check --workspace
+
   frontend-build:
     runs-on: ubuntu-latest
     steps:
@@ -34,6 +42,9 @@ jobs:
       - name: Typecheck
         working-directory: desktop
         run: npx vue-tsc --noEmit
+      - name: Test
+        working-directory: desktop
+        run: npm test
       - name: Build
         working-directory: desktop
         run: npm run build

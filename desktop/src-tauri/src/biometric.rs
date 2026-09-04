@@ -14,29 +14,69 @@ const ACCOUNT: &str = "master-passphrase";
 
 #[cfg(target_os = "macos")]
 mod macos {
-    use super::{SERVICE, ACCOUNT};
-    use security_framework::access_control::SecAccessControl;
+    use super::{ACCOUNT, SERVICE};
+    use core_foundation::base::TCFType;
+    use core_foundation::dictionary::CFDictionary;
+    use core_foundation::string::CFString;
+    use core_foundation_sys::base::{CFTypeRef, OSStatus};
+    use core_foundation_sys::string::CFStringRef;
+    use objc2_local_authentication::{LAContext, LAPolicy};
     use security_framework::base::Error;
     use security_framework::passwords::{self, AccessControlOptions, PasswordOptions};
+    use security_framework_sys::base::{errSecAuthFailed, errSecItemNotFound, errSecSuccess};
+    use security_framework_sys::item::kSecUseAuthenticationUI;
+    use security_framework_sys::keychain_item::SecItemCopyMatching;
 
-    /// Check whether Touch ID / biometry is available by attempting to create
-    /// a `SecAccessControl` object that requires biometry. If the device has
-    /// no biometric hardware or no fingerprints enrolled, the creation fails.
-    pub fn biometry_available() -> bool {
-        SecAccessControl::create_with_flags(AccessControlOptions::BIOMETRY_ANY.bits()).is_ok()
+    // Security.framework does not currently expose these through
+    // security-framework-sys. Keep the numeric OSStatus values local and map
+    // them to explicit, fail-closed errors below.
+    const ERR_SEC_INTERACTION_NOT_ALLOWED: OSStatus = -25308;
+    const ERR_SEC_MISSING_ENTITLEMENT: OSStatus = -34018;
+
+    // `kSecUseAuthenticationUIFail` is deprecated by Apple in favor of an
+    // LAContext with interactionNotAllowed, but it remains the most direct way
+    // to guarantee this existence-only query never presents authentication UI
+    // without bridging an Objective-C LAContext through CoreFoundation FFI.
+    #[link(name = "Security", kind = "framework")]
+    extern "C" {
+        static kSecUseAuthenticationUIFail: CFStringRef;
     }
 
-    /// Check whether a keychain item exists **without triggering the biometric
-    /// prompt**. Uses `SecItemCopyMatching` with `kSecReturnData` absent so only
-    /// attributes are queried, not the encrypted data.
-    pub fn passphrase_stored() -> bool {
-        use core_foundation::base::TCFType;
-        use core_foundation::dictionary::CFDictionary;
-        use core_foundation_sys::base::{CFTypeRef, OSStatus};
-        use security_framework_sys::keychain_item::SecItemCopyMatching;
+    fn password_options() -> PasswordOptions {
+        let mut options = PasswordOptions::new_generic_password(SERVICE, ACCOUNT);
+        // On macOS, SecItem defaults to the legacy file-based keychain. Access
+        // control backed by Touch ID must live in the Data Protection Keychain.
+        options.use_protected_keychain();
+        options
+    }
+
+    /// Return whether this Mac can currently evaluate a biometric-only policy.
+    /// On macOS this corresponds to Touch ID availability/enrollment and also
+    /// accounts for temporary states such as biometric lockout.
+    pub fn biometry_available() -> bool {
+        unsafe {
+            let context = LAContext::new();
+            context
+                .canEvaluatePolicy_error(LAPolicy::DeviceOwnerAuthenticationWithBiometrics)
+                .is_ok()
+        }
+    }
+
+    /// Check whether the protected passphrase exists without displaying an
+    /// authentication prompt. `errSecInteractionNotAllowed` means an item did
+    /// match but its access control requires interaction, which is exactly the
+    /// expected result for a Touch ID-protected credential in a no-UI query.
+    pub fn passphrase_stored() -> Result<bool, String> {
+        let mut options = password_options();
 
         #[allow(deprecated)]
-        let options = PasswordOptions::new_generic_password(SERVICE, ACCOUNT);
+        unsafe {
+            options.query.push((
+                CFString::wrap_under_get_rule(kSecUseAuthenticationUI),
+                CFString::wrap_under_get_rule(kSecUseAuthenticationUIFail).into_CFType(),
+            ));
+        }
+
         #[allow(deprecated)]
         let params = CFDictionary::from_CFType_pairs(&options.query[..]);
 
@@ -44,59 +84,71 @@ mod macos {
         let status: OSStatus =
             unsafe { SecItemCopyMatching(params.as_concrete_TypeRef(), &mut ret) };
 
-        // Any status other than "item not found" means the entry exists.
-        status != security_framework_sys::base::errSecItemNotFound
+        match status {
+            errSecSuccess | ERR_SEC_INTERACTION_NOT_ALLOWED => Ok(true),
+            errSecItemNotFound => Ok(false),
+            code => Err(format_keychain_error(Error::from_code(code))),
+        }
     }
 
-    /// Store the passphrase in the macOS keychain with biometric (Touch ID)
-    /// access control. The passphrase can only be retrieved after the user
-    /// successfully authenticates with Touch ID.
+    /// Store the passphrase in the Data Protection Keychain with biometric
+    /// (Touch ID) access control. The passphrase can only be retrieved after
+    /// the user successfully authenticates with Touch ID.
     pub fn store_passphrase(passphrase: &str) -> Result<(), String> {
-        // Delete any existing item first — SecItemUpdate does not reliably
-        // update access-control attributes, so we remove and re-add.
-        let _ = passwords::delete_generic_password(SERVICE, ACCOUNT);
+        // Access-control attributes cannot be safely changed with a generic
+        // update, so replace any existing protected item atomically from the
+        // application's perspective.
+        delete_if_present()?;
 
-        let mut options = PasswordOptions::new_generic_password(SERVICE, ACCOUNT);
+        let mut options = password_options();
         options.set_access_control_options(AccessControlOptions::BIOMETRY_ANY);
 
         passwords::set_generic_password_options(passphrase.as_bytes(), options)
             .map_err(format_keychain_error)
     }
 
-    /// Retrieve the passphrase from the keychain. This call blocks and
-    /// triggers the Touch ID prompt. Returns a `Zeroizing<String>` so the
-    /// passphrase is wiped from memory when dropped.
+    /// Retrieve the passphrase from the Data Protection Keychain. This blocks
+    /// while macOS presents the Touch ID prompt.
     pub fn retrieve_passphrase() -> Result<zeroize::Zeroizing<String>, String> {
-        let data = passwords::generic_password(PasswordOptions::new_generic_password(
-            SERVICE,
-            ACCOUNT,
-        ))
-        .map_err(format_keychain_error)?;
-
+        let data = passwords::generic_password(password_options()).map_err(format_keychain_error)?;
         let s = String::from_utf8(data)
             .map_err(|e| format!("keychain data is not valid UTF-8: {e}"))?;
         Ok(zeroize::Zeroizing::new(s))
     }
 
-    /// Delete the passphrase from the keychain.
+    /// Delete the protected passphrase. Clearing an already-missing item is
+    /// intentionally idempotent so disabling biometric unlock is reliable.
     pub fn clear_passphrase() -> Result<(), String> {
-        passwords::delete_generic_password(SERVICE, ACCOUNT)
-            .map_err(format_keychain_error)
+        delete_if_present()
+    }
+
+    fn delete_if_present() -> Result<(), String> {
+        match passwords::delete_generic_password_options(password_options()) {
+            Ok(()) => Ok(()),
+            Err(e) if e.code() == errSecItemNotFound => Ok(()),
+            Err(e) => Err(format_keychain_error(e)),
+        }
     }
 
     fn format_keychain_error(e: Error) -> String {
         let code = e.code();
         match code {
-            security_framework_sys::base::errSecItemNotFound => {
-                "no biometric passphrase stored".into()
-            }
-            // -25293: auth failed or user canceled the Touch ID prompt
-            security_framework_sys::base::errSecAuthFailed => {
-                "Touch ID authentication failed or was canceled".into()
-            }
-            // -128: user clicked "Cancel" on the Touch ID dialog
+            errSecItemNotFound => "no biometric passphrase stored".into(),
+            errSecAuthFailed => "Touch ID authentication failed or was canceled".into(),
+            // errSecUserCanceled
             -128 => "Touch ID was canceled by the user".into(),
-            _ => format!("keychain error (code {code})"),
+            ERR_SEC_INTERACTION_NOT_ALLOWED => {
+                "Touch ID interaction is not allowed in the current context".into()
+            }
+            ERR_SEC_MISSING_ENTITLEMENT => concat!(
+                "biometric keychain access requires a properly signed macOS app ",
+                "with valid Data Protection Keychain entitlements"
+            )
+            .into(),
+            _ => match e.message() {
+                Some(message) => format!("keychain error (code {code}): {message}"),
+                None => format!("keychain error (code {code})"),
+            },
         }
     }
 }
@@ -110,8 +162,8 @@ mod stub {
     pub fn biometry_available() -> bool {
         false
     }
-    pub fn passphrase_stored() -> bool {
-        false
+    pub fn passphrase_stored() -> Result<bool, String> {
+        Ok(false)
     }
     pub fn store_passphrase(_passphrase: &str) -> Result<(), String> {
         Err("biometric unlock is not available on this platform".into())
@@ -133,20 +185,20 @@ use stub as platform;
 // Tauri commands
 // ============================================================
 
-/// Returns `true` on macOS devices with Touch ID enrolled.
+/// Returns `true` when this Mac can currently evaluate Touch ID.
 #[tauri::command]
 pub async fn biometric_available() -> ApiResult<bool> {
     Ok(platform::biometry_available())
 }
 
-/// Checks whether a biometric passphrase has been stored in the keychain.
-/// This does **not** trigger the Touch ID prompt.
+/// Checks whether a protected biometric passphrase is stored without showing
+/// an authentication prompt.
 #[tauri::command]
 pub async fn biometric_passphrase_stored() -> ApiResult<bool> {
-    Ok(platform::passphrase_stored())
+    platform::passphrase_stored()
 }
 
-/// Store the vault passphrase in the macOS keychain, protected by Touch ID.
+/// Store the vault passphrase in the OS keychain, protected by Touch ID.
 /// The passphrase is verified against the vault before storing to prevent
 /// saving an incorrect passphrase.
 #[tauri::command]
@@ -154,42 +206,39 @@ pub async fn store_biometric_passphrase(
     state: State<'_, Arc<AppState>>,
     passphrase: String,
 ) -> ApiResult<()> {
-    // Verify the passphrase can actually decrypt the vault before storing it.
-    let vault = state.vault.lock().await;
-    vault.verify_passphrase(&passphrase).map_err(|e| e.to_string())?;
-    drop(vault);
+    let passphrase = zeroize::Zeroizing::new(passphrase);
 
-    platform::store_passphrase(&passphrase)
-}
-
-/// Unlock the vault by retrieving the passphrase from the keychain.
-/// On macOS this triggers the Touch ID prompt. The call blocks until the
-/// user authenticates or cancels.
-#[tauri::command]
-pub async fn unlock_with_biometric(
-    state: State<'_, Arc<AppState>>,
-) -> ApiResult<bool> {
-    // Keychain retrieval blocks the calling thread while the Touch ID dialog
-    // is shown, so run it on a blocking thread to avoid stalling the runtime.
-    let passphrase = tokio::task::spawn_blocking(platform::retrieve_passphrase)
-        .await
-        .map_err(|e| e.to_string())??;
-
-    // Verify the retrieved passphrase against the vault.
     let vault = state.vault.lock().await;
     vault
         .verify_passphrase(passphrase.as_str())
         .map_err(|e| e.to_string())?;
     drop(vault);
 
-    // Store the passphrase in AppState for the unlocked session.
+    platform::store_passphrase(passphrase.as_str())
+}
+
+/// Unlock the vault by retrieving the passphrase from the keychain. On macOS
+/// this triggers the Touch ID prompt. The blocking OS call runs off the async
+/// runtime so the application stays responsive while authentication is open.
+#[tauri::command]
+pub async fn unlock_with_biometric(state: State<'_, Arc<AppState>>) -> ApiResult<bool> {
+    let passphrase = tokio::task::spawn_blocking(platform::retrieve_passphrase)
+        .await
+        .map_err(|e| e.to_string())??;
+
+    let vault = state.vault.lock().await;
+    vault
+        .verify_passphrase(passphrase.as_str())
+        .map_err(|e| e.to_string())?;
+    drop(vault);
+
     let mut pw = state.passphrase.lock().await;
     *pw = Some(passphrase);
 
     Ok(true)
 }
 
-/// Remove the biometric passphrase from the keychain.
+/// Remove the biometric passphrase from the OS keychain.
 #[tauri::command]
 pub async fn clear_biometric_passphrase() -> ApiResult<()> {
     platform::clear_passphrase()

@@ -21,6 +21,8 @@ describe("vault store", () => {
   beforeEach(() => {
     setActivePinia(createPinia());
     vi.clearAllMocks();
+    vi.mocked(api.biometricAvailable).mockResolvedValue(false);
+    vi.mocked(api.biometricPassphraseStored).mockResolvedValue(false);
   });
 
   describe("initial state", () => {
@@ -46,6 +48,33 @@ describe("vault store", () => {
       expect(store.unlocked).toBe(false);
       expect(store.needsSetup).toBe(false);
       expect(store.needsUnlock).toBe(true);
+    });
+
+    it("uses the protected Keychain item as biometric source of truth", async () => {
+      const store = useVaultStore();
+      vi.mocked(api.biometricAvailable).mockResolvedValue(true);
+      vi.mocked(api.biometricPassphraseStored).mockResolvedValue(true);
+
+      await store.checkStatus();
+
+      expect(api.biometricPassphraseStored).toHaveBeenCalledTimes(1);
+      expect(store.biometricAvailable).toBe(true);
+      expect(store.biometricEnabled).toBe(true);
+      expect(store.error).toBeNull();
+    });
+
+    it("fails closed when the protected Keychain state cannot be queried", async () => {
+      const store = useVaultStore();
+      vi.mocked(api.biometricAvailable).mockResolvedValue(true);
+      vi.mocked(api.biometricPassphraseStored).mockRejectedValue(
+        new Error("Keychain unavailable"),
+      );
+
+      await store.checkStatus();
+
+      expect(store.biometricAvailable).toBe(true);
+      expect(store.biometricEnabled).toBe(false);
+      expect(store.error).toBe("Error: Keychain unavailable");
     });
   });
 
