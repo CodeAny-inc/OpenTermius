@@ -5,7 +5,7 @@ import { useVaultStore } from "./vault";
 vi.mock("../api", () => ({
   vaultIsInitialized: vi.fn(() => Promise.resolve(false)),
   isVaultUnlocked: vi.fn(() => Promise.resolve(false)),
-  initializeVault: vi.fn(() => Promise.resolve()),
+  initializeVault: vi.fn(() => Promise.resolve(true)),
   unlockVault: vi.fn(() => Promise.resolve()),
   lockVault: vi.fn(() => Promise.resolve()),
   biometricAvailable: vi.fn(() => Promise.resolve(false)),
@@ -23,7 +23,7 @@ describe("vault store", () => {
     vi.clearAllMocks();
     vi.mocked(api.vaultIsInitialized).mockResolvedValue(false);
     vi.mocked(api.isVaultUnlocked).mockResolvedValue(false);
-    vi.mocked(api.initializeVault).mockResolvedValue(undefined);
+    vi.mocked(api.initializeVault).mockResolvedValue(true);
     vi.mocked(api.unlockVault).mockResolvedValue(undefined);
     vi.mocked(api.lockVault).mockResolvedValue(undefined);
     vi.mocked(api.biometricAvailable).mockResolvedValue(false);
@@ -102,37 +102,48 @@ describe("vault store", () => {
   });
 
   describe("initialize", () => {
-    it("clears any stale biometric credential before creating a new vault", async () => {
+    it("delegates stale-credential cleanup to the guarded backend initializer", async () => {
       const store = useVaultStore();
       store.biometricEnabled = true;
 
       await store.initialize("my-passphrase");
 
-      expect(api.clearBiometricPassphrase).toHaveBeenCalledTimes(1);
+      expect(api.clearBiometricPassphrase).not.toHaveBeenCalled();
       expect(api.initializeVault).toHaveBeenCalledWith("my-passphrase");
-      expect(
-        vi.mocked(api.clearBiometricPassphrase).mock.invocationCallOrder[0],
-      ).toBeLessThan(vi.mocked(api.initializeVault).mock.invocationCallOrder[0]);
       expect(store.biometricEnabled).toBe(false);
       expect(store.initialized).toBe(true);
       expect(store.unlocked).toBe(true);
       expect(store.error).toBeNull();
     });
 
-    it("does not create a new vault when stale biometric cleanup fails", async () => {
+    it("does not delete biometric credentials when backend initialization is rejected", async () => {
       const store = useVaultStore();
-      vi.mocked(api.clearBiometricPassphrase).mockRejectedValue(
-        new Error("Keychain delete failed"),
+      store.biometricEnabled = true;
+      vi.mocked(api.initializeVault).mockRejectedValue(
+        new Error("vault already initialized"),
       );
 
       await expect(store.initialize("my-passphrase")).rejects.toThrow(
-        "Keychain delete failed",
+        "vault already initialized",
       );
 
-      expect(api.initializeVault).not.toHaveBeenCalled();
+      expect(api.clearBiometricPassphrase).not.toHaveBeenCalled();
+      expect(store.biometricEnabled).toBe(true);
       expect(store.initialized).toBe(false);
       expect(store.unlocked).toBe(false);
-      expect(store.error).toBe("Error: Keychain delete failed");
+      expect(store.error).toBe("Error: vault already initialized");
+    });
+
+    it("keeps a successfully created vault locked when a newer lock supersedes auto-unlock", async () => {
+      const store = useVaultStore();
+      vi.mocked(api.initializeVault).mockResolvedValue(false);
+
+      await store.initialize("my-passphrase");
+
+      expect(store.initialized).toBe(true);
+      expect(store.unlocked).toBe(false);
+      expect(store.needsUnlock).toBe(true);
+      expect(store.error).toBeNull();
     });
 
     it("sets error on vault initialization failure", async () => {

@@ -1,14 +1,24 @@
 use crate::state::AppState;
+use opentermius_core::vault::Vault;
 use std::sync::Arc;
 use tauri::State;
 
 type ApiResult<T> = std::result::Result<T, String>;
 
-/// Keychain service and account identifiers for the stored vault passphrase.
+/// Keychain identifiers for the stored vault passphrase. Each protected item is
+/// additionally bound to the current vault generation so an orphaned Keychain
+/// item can never become authoritative for a newly initialized vault.
 #[cfg(all(target_os = "macos", feature = "macos-biometric"))]
 const SERVICE: &str = "com.opentermius.vault";
 #[cfg(all(target_os = "macos", feature = "macos-biometric"))]
-const ACCOUNT: &str = "master-passphrase";
+const ACCOUNT_PREFIX: &str = "master-passphrase";
+
+fn vault_binding_id(vault: &Vault) -> ApiResult<String> {
+    vault
+        .binding_id()
+        .map(str::to_owned)
+        .ok_or_else(|| "vault not initialized".to_string())
+}
 
 // ============================================================
 // macOS implementation — Touch ID via Security framework
@@ -16,7 +26,7 @@ const ACCOUNT: &str = "master-passphrase";
 
 #[cfg(all(target_os = "macos", feature = "macos-biometric"))]
 mod macos {
-    use super::{ACCOUNT, SERVICE};
+    use super::{ACCOUNT_PREFIX, SERVICE};
     use core_foundation::base::TCFType;
     use core_foundation::dictionary::CFDictionary;
     use core_foundation::string::CFString;
@@ -52,12 +62,20 @@ mod macos {
         Invalidated,
     }
 
-    fn password_options() -> PasswordOptions {
-        let mut options = PasswordOptions::new_generic_password(SERVICE, ACCOUNT);
+    fn account_for_binding(binding_id: &str) -> String {
+        format!("{ACCOUNT_PREFIX}:{binding_id}")
+    }
+
+    fn password_options_for_account(account: &str) -> PasswordOptions {
+        let mut options = PasswordOptions::new_generic_password(SERVICE, account);
         // On macOS, SecItem defaults to the legacy file-based keychain. Access
         // control backed by Touch ID must live in the Data Protection Keychain.
         options.use_protected_keychain();
         options
+    }
+
+    fn password_options(binding_id: &str) -> PasswordOptions {
+        password_options_for_account(&account_for_binding(binding_id))
     }
 
     /// Return whether this Mac can currently evaluate a biometric-only policy.
@@ -90,8 +108,8 @@ mod macos {
     /// A valid biometric item requires interaction and therefore reports as
     /// `Stored`; an item invalidated by enrollment changes is distinguished so
     /// callers can safely offer explicit re-enrollment with the master password.
-    fn passphrase_state() -> Result<PassphraseState, String> {
-        let mut options = password_options();
+    fn passphrase_state(binding_id: &str) -> Result<PassphraseState, String> {
+        let mut options = password_options(binding_id);
 
         #[allow(deprecated)]
         unsafe {
@@ -111,20 +129,21 @@ mod macos {
         classify_passphrase_status(status)
     }
 
-    /// Check whether a currently usable protected passphrase exists without
-    /// displaying an authentication prompt. An item invalidated by Touch ID
-    /// enrollment changes is reported as not stored so the UI can re-enable it.
-    pub fn passphrase_stored() -> Result<bool, String> {
-        Ok(matches!(passphrase_state()?, PassphraseState::Stored))
+    /// Check whether a currently usable protected passphrase exists for this
+    /// exact vault generation without displaying an authentication prompt.
+    pub fn passphrase_stored(binding_id: &str) -> Result<bool, String> {
+        Ok(matches!(
+            passphrase_state(binding_id)?,
+            PassphraseState::Stored
+        ))
     }
 
     /// Store the passphrase in the Data Protection Keychain with biometric
     /// (Touch ID) access control. `BIOMETRY_CURRENT_SET` binds the credential
-    /// to the Touch ID enrollment that exists at enable time, so adding or
-    /// removing fingerprints invalidates the stored passphrase and requires
-    /// the user to re-enable biometric unlock with the master passphrase.
-    pub fn store_passphrase(passphrase: &str) -> Result<(), String> {
-        match passphrase_state()? {
+    /// to the Touch ID enrollment that exists at enable time, while the account
+    /// name binds it to the current vault generation.
+    pub fn store_passphrase(binding_id: &str, passphrase: &str) -> Result<(), String> {
+        match passphrase_state(binding_id)? {
             PassphraseState::Stored => {
                 return Err(concat!(
                     "biometric unlock is already enabled; disable it before replacing ",
@@ -136,7 +155,7 @@ mod macos {
                 // The caller already verified the master passphrase against the
                 // vault. Missing and invalidated credentials are therefore safe
                 // to clean up before creating a fresh current-set item.
-                delete_if_present()?;
+                delete_if_present(binding_id)?;
             }
         }
 
@@ -155,30 +174,41 @@ mod macos {
             )
         })?;
 
-        let mut options = password_options();
+        let mut options = password_options(binding_id);
         options.set_access_control(access_control);
 
         passwords::set_generic_password_options(passphrase.as_bytes(), options)
             .map_err(format_keychain_error)
     }
 
-    /// Retrieve the passphrase from the Data Protection Keychain. This blocks
-    /// while macOS presents the Touch ID prompt.
-    pub fn retrieve_passphrase() -> Result<zeroize::Zeroizing<String>, String> {
-        let data = passwords::generic_password(password_options()).map_err(format_keychain_error)?;
+    /// Retrieve the passphrase for this exact vault generation from the Data
+    /// Protection Keychain. This blocks while macOS presents the Touch ID prompt.
+    pub fn retrieve_passphrase(binding_id: &str) -> Result<zeroize::Zeroizing<String>, String> {
+        let data = passwords::generic_password(password_options(binding_id))
+            .map_err(format_keychain_error)?;
         let s = String::from_utf8(data)
             .map_err(|e| format!("keychain data is not valid UTF-8: {e}"))?;
         Ok(zeroize::Zeroizing::new(s))
     }
 
-    /// Delete the protected passphrase. Clearing an already-missing item is
-    /// intentionally idempotent so disabling biometric unlock is reliable.
-    pub fn clear_passphrase() -> Result<(), String> {
-        delete_if_present()
+    /// Delete the protected passphrase for this vault generation. Clearing an
+    /// already-missing item is intentionally idempotent.
+    pub fn clear_passphrase(binding_id: &str) -> Result<(), String> {
+        delete_if_present(binding_id)
     }
 
-    fn delete_if_present() -> Result<(), String> {
-        match passwords::delete_generic_password_options(password_options()) {
+    /// Remove the pre-binding account used by earlier revisions of this PR.
+    /// This is only migration hygiene; new credentials are never stored there.
+    pub fn clear_legacy_passphrase() -> Result<(), String> {
+        delete_account_if_present(ACCOUNT_PREFIX)
+    }
+
+    fn delete_if_present(binding_id: &str) -> Result<(), String> {
+        delete_account_if_present(&account_for_binding(binding_id))
+    }
+
+    fn delete_account_if_present(account: &str) -> Result<(), String> {
+        match passwords::delete_generic_password_options(password_options_for_account(account)) {
             Ok(()) => Ok(()),
             Err(e) if e.code() == errSecItemNotFound => Ok(()),
             Err(e) => Err(format_keychain_error(e)),
@@ -210,7 +240,8 @@ mod macos {
     #[cfg(test)]
     mod tests {
         use super::{
-            classify_passphrase_status, PassphraseState, ERR_SEC_INTERACTION_NOT_ALLOWED,
+            account_for_binding, classify_passphrase_status, PassphraseState,
+            ERR_SEC_INTERACTION_NOT_ALLOWED,
         };
         use security_framework_sys::base::{errSecAuthFailed, errSecItemNotFound, errSecSuccess};
 
@@ -233,6 +264,14 @@ mod macos {
                 PassphraseState::Stored
             );
         }
+
+        #[test]
+        fn keychain_account_is_bound_to_vault_generation() {
+            assert_eq!(
+                account_for_binding("vault-generation"),
+                "master-passphrase:vault-generation"
+            );
+        }
     }
 }
 
@@ -241,26 +280,29 @@ mod macos {
 // ============================================================
 
 // The stub is used on non-macOS platforms and on ordinary/ad-hoc-signed macOS
-// builds. `macos-biometric` is intentionally opt-in until the release pipeline
-// provides valid Apple signing and Data Protection Keychain entitlements.
+// builds. It deliberately cannot touch the protected Keychain item. Vault-bound
+// account names ensure an item left by an earlier feature-enabled build can
+// never become authoritative for a newly initialized vault after a downgrade.
 #[cfg(not(all(target_os = "macos", feature = "macos-biometric")))]
 mod stub {
     pub fn biometry_available() -> bool {
         false
     }
-    pub fn passphrase_stored() -> Result<bool, String> {
+    pub fn passphrase_stored(_binding_id: &str) -> Result<bool, String> {
         Ok(false)
     }
-    pub fn store_passphrase(_passphrase: &str) -> Result<(), String> {
+    pub fn store_passphrase(_binding_id: &str, _passphrase: &str) -> Result<(), String> {
         Err("biometric unlock is not available in this build".into())
     }
-    pub fn retrieve_passphrase() -> Result<zeroize::Zeroizing<String>, String> {
+    pub fn retrieve_passphrase(
+        _binding_id: &str,
+    ) -> Result<zeroize::Zeroizing<String>, String> {
         Err("biometric unlock is not available in this build".into())
     }
-    pub fn clear_passphrase() -> Result<(), String> {
-        // Clearing is an idempotent lifecycle operation. Unsupported builds
-        // have no biometric credential to remove, so treating this as success
-        // lets new-vault initialization perform unconditional stale-item cleanup.
+    pub fn clear_passphrase(_binding_id: &str) -> Result<(), String> {
+        Ok(())
+    }
+    pub fn clear_legacy_passphrase() -> Result<(), String> {
         Ok(())
     }
 }
@@ -270,11 +312,11 @@ use macos as platform;
 #[cfg(not(all(target_os = "macos", feature = "macos-biometric")))]
 use stub as platform;
 
-/// Internal lifecycle hook used before a brand-new vault is created. Keeping
-/// this at the backend boundary prevents callers from bypassing stale-Keychain
-/// cleanup by invoking the vault initialization command directly.
+/// Best-effort migration cleanup for the static account used by earlier
+/// revisions. New vaults are protected primarily by per-vault Keychain account
+/// binding, so an orphaned bound item cannot attach to a newly initialized vault.
 pub(crate) fn clear_for_vault_initialization() -> ApiResult<()> {
-    platform::clear_passphrase()
+    platform::clear_legacy_passphrase()
 }
 
 // ============================================================
@@ -288,11 +330,21 @@ pub async fn biometric_available() -> ApiResult<bool> {
     Ok(platform::biometry_available())
 }
 
-/// Checks whether a protected biometric passphrase is stored without showing
-/// an authentication prompt.
+/// Checks whether a protected biometric passphrase is stored for the current
+/// vault generation without showing an authentication prompt.
 #[tauri::command]
-pub async fn biometric_passphrase_stored() -> ApiResult<bool> {
-    platform::passphrase_stored()
+pub async fn biometric_passphrase_stored(
+    state: State<'_, Arc<AppState>>,
+) -> ApiResult<bool> {
+    let binding_id = {
+        let vault = state.vault.lock().await;
+        match vault.binding_id() {
+            Some(id) => id.to_owned(),
+            None => return Ok(false),
+        }
+    };
+
+    platform::passphrase_stored(&binding_id)
 }
 
 /// Store the vault passphrase in the OS keychain, protected by Touch ID.
@@ -305,25 +357,33 @@ pub async fn store_biometric_passphrase(
 ) -> ApiResult<()> {
     let passphrase = zeroize::Zeroizing::new(passphrase);
 
-    let vault = state.vault.lock().await;
-    vault
-        .verify_passphrase(passphrase.as_str())
-        .map_err(|e| e.to_string())?;
-    drop(vault);
+    let binding_id = {
+        let vault = state.vault.lock().await;
+        vault
+            .verify_passphrase(passphrase.as_str())
+            .map_err(|e| e.to_string())?;
+        vault_binding_id(&vault)?
+    };
 
-    platform::store_passphrase(passphrase.as_str())
+    platform::store_passphrase(&binding_id, passphrase.as_str())
 }
 
-/// Unlock the vault by retrieving the passphrase from the keychain. On an
-/// enabled macOS build this triggers the Touch ID prompt. The blocking OS call
-/// runs off the async runtime so the application stays responsive while
-/// authentication is open. A newer lock invalidates the attempt before commit.
+/// Unlock the vault by retrieving the passphrase from the Keychain item bound
+/// to the current vault generation. On an enabled macOS build this triggers the
+/// Touch ID prompt. A newer lock invalidates the attempt before commit.
 #[tauri::command]
 pub async fn unlock_with_biometric(state: State<'_, Arc<AppState>>) -> ApiResult<bool> {
     let generation = state.auth_generation.current();
-    let passphrase = tokio::task::spawn_blocking(platform::retrieve_passphrase)
-        .await
-        .map_err(|e| e.to_string())??;
+    let binding_id = {
+        let vault = state.vault.lock().await;
+        vault_binding_id(&vault)?
+    };
+
+    let passphrase = tokio::task::spawn_blocking(move || {
+        platform::retrieve_passphrase(&binding_id)
+    })
+    .await
+    .map_err(|e| e.to_string())??;
 
     let vault = state.vault.lock().await;
     vault
@@ -340,9 +400,19 @@ pub async fn unlock_with_biometric(state: State<'_, Arc<AppState>>) -> ApiResult
     Ok(true)
 }
 
-/// Remove the biometric passphrase from the OS keychain. This is idempotent;
-/// unsupported builds have no biometric credential and therefore succeed.
+/// Remove the biometric passphrase for the current vault generation. The
+/// pre-binding account used by earlier revisions is cleaned up as well.
 #[tauri::command]
-pub async fn clear_biometric_passphrase() -> ApiResult<()> {
-    clear_for_vault_initialization()
+pub async fn clear_biometric_passphrase(
+    state: State<'_, Arc<AppState>>,
+) -> ApiResult<()> {
+    let binding_id = {
+        let vault = state.vault.lock().await;
+        vault.binding_id().map(str::to_owned)
+    };
+
+    if let Some(binding_id) = binding_id {
+        platform::clear_passphrase(&binding_id)?;
+    }
+    platform::clear_legacy_passphrase()
 }

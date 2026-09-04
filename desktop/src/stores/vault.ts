@@ -45,15 +45,14 @@ export const useVaultStore = defineStore("vault", () => {
   async function initialize(passphrase: string) {
     error.value = null;
     try {
-      // A Keychain item can outlive vault.json. Remove any old biometric
-      // credential before creating a new vault so the new vault never silently
-      // inherits biometric unlock from an unrelated previous vault.
-      await api.clearBiometricPassphrase();
-      biometricEnabled.value = false;
-
-      await api.initializeVault(passphrase);
+      // The backend owns the entire initialization boundary: it first rejects
+      // an already-initialized vault, then handles legacy Keychain cleanup and
+      // creates the new vault. Do not clear biometric state before that guard,
+      // or a stale frontend call could delete credentials for an existing vault.
+      const unlockedAfterInitialization = await api.initializeVault(passphrase);
       initialized.value = true;
-      unlocked.value = true;
+      unlocked.value = unlockedAfterInitialization;
+      biometricEnabled.value = false;
     } catch (e) {
       error.value = String(e);
       throw e;

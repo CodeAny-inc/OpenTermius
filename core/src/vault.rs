@@ -55,6 +55,16 @@ impl Vault {
         &self.file.keys_meta
     }
 
+    /// Return a non-secret identifier that is stable for the lifetime of this
+    /// vault generation and changes whenever a brand-new vault is initialized.
+    ///
+    /// The random KDF salt already has exactly those properties, so using it as
+    /// an external credential-binding identifier avoids adding another piece of
+    /// persisted state. Callers must not treat this value as secret material.
+    pub fn binding_id(&self) -> Option<&str> {
+        self.is_initialized().then_some(self.file.salt.as_str())
+    }
+
     pub fn initialize(&mut self, passphrase: &str) -> Result<()> {
         let mut salt = [0u8; 16];
         use rand::RngCore;
@@ -207,5 +217,21 @@ mod tests {
 
         assert!(vault.verify_passphrase("correct horse battery staple").is_ok());
         assert!(vault.verify_passphrase("wrong passphrase").is_err());
+    }
+
+    #[test]
+    fn binding_id_is_stable_for_an_initialized_vault() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("vault.json");
+        let mut vault = Vault::open(path.clone()).expect("open vault");
+        assert!(vault.binding_id().is_none());
+
+        vault.initialize("correct horse battery staple").expect("initialize");
+        let binding_id = vault.binding_id().expect("binding id").to_string();
+        assert!(!binding_id.is_empty());
+        drop(vault);
+
+        let reopened = Vault::open(path).expect("reopen vault");
+        assert_eq!(reopened.binding_id(), Some(binding_id.as_str()));
     }
 }
