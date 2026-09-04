@@ -90,7 +90,12 @@ async function enableBiometric() {
 }
 
 async function disableBiometric() {
-  await vault.disableBiometric();
+  error.value = "";
+  try {
+    await vault.disableBiometric();
+  } catch (e: any) {
+    error.value = String(e);
+  }
 }
 
 const showBiometricButton = computed(
@@ -216,6 +221,7 @@ const showBiometricButton = computed(
                 Biometric unlock is enabled. You can unlock the vault with Touch ID
                 instead of typing your passphrase.
               </p>
+              <p v-if="error" class="text-[12px] text-destructive mb-3">{{ error }}</p>
               <Button variant="outline" size="sm" @click="disableBiometric">
                 Disable biometric unlock
               </Button>

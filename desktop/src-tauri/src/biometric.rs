@@ -99,9 +99,22 @@ mod macos {
     /// removing fingerprints invalidates the stored passphrase and requires
     /// the user to re-enable biometric unlock with the master passphrase.
     pub fn store_passphrase(passphrase: &str) -> Result<(), String> {
-        // Access-control attributes cannot be safely changed with a generic
-        // update, so replace any existing protected item atomically from the
-        // application's perspective.
+        // Never destroy a credential that the no-UI probe says is still usable.
+        // Access-control attributes cannot be safely rotated by the generic
+        // password update path, so a caller must explicitly disable biometric
+        // unlock before replacing a valid protected item.
+        if passphrase_stored()? {
+            return Err(concat!(
+                "biometric unlock is already enabled; disable it before replacing ",
+                "the protected credential"
+            )
+            .into());
+        }
+
+        // The probe established that there is no usable credential. An
+        // invalidated item can still be addressable for deletion on some macOS
+        // versions, so clean it up before creating the new current-set item.
+        // If the subsequent add fails, no working credential has been removed.
         delete_if_present()?;
 
         let mut options = password_options();

@@ -14,23 +14,30 @@ export const useVaultStore = defineStore("vault", () => {
     () => initialized.value && !unlocked.value,
   );
 
+  async function reconcileBiometricState() {
+    biometricEnabled.value = false;
+    if (!biometricAvailable.value) return;
+
+    // This backend query is explicitly non-interactive, so it is safe to use
+    // after a failed Touch ID attempt to distinguish cancellation/transient
+    // failure from a credential that has disappeared or been invalidated.
+    biometricEnabled.value = await api.biometricPassphraseStored();
+  }
+
   async function checkStatus() {
     error.value = null;
     initialized.value = await api.vaultIsInitialized();
     unlocked.value = await api.isVaultUnlocked();
     biometricAvailable.value = await api.biometricAvailable();
-    biometricEnabled.value = false;
 
-    if (biometricAvailable.value) {
-      try {
-        // The protected Keychain item is the source of truth. This backend
-        // query is explicitly non-interactive and does not show Touch ID UI.
-        biometricEnabled.value = await api.biometricPassphraseStored();
-      } catch (e) {
-        // Fail closed: never advertise biometric unlock if the Keychain state
-        // cannot be established reliably.
-        error.value = String(e);
-      }
+    try {
+      // The protected Keychain item is the source of truth for whether the UI
+      // should offer Touch ID.
+      await reconcileBiometricState();
+    } catch (e) {
+      // Fail closed: never advertise biometric unlock if the Keychain state
+      // cannot be established reliably.
+      error.value = String(e);
     }
   }
 
@@ -66,8 +73,16 @@ export const useVaultStore = defineStore("vault", () => {
         throw new Error("Biometric unlock failed");
       }
     } catch (e) {
-      error.value = String(e);
-      throw e;
+      const unlockError = e;
+      try {
+        await reconcileBiometricState();
+      } catch {
+        // The reconciliation itself is fail-closed because it clears
+        // biometricEnabled before probing. Preserve the original unlock error
+        // for the user instead of replacing it with a secondary probe error.
+      }
+      error.value = String(unlockError);
+      throw unlockError;
     }
   }
 
@@ -77,8 +92,14 @@ export const useVaultStore = defineStore("vault", () => {
       await api.storeBiometricPassphrase(passphrase);
       biometricEnabled.value = true;
     } catch (e) {
-      error.value = String(e);
-      throw e;
+      const enableError = e;
+      try {
+        await reconcileBiometricState();
+      } catch {
+        // Fail closed and keep the original operation error.
+      }
+      error.value = String(enableError);
+      throw enableError;
     }
   }
 
@@ -88,8 +109,14 @@ export const useVaultStore = defineStore("vault", () => {
       await api.clearBiometricPassphrase();
       biometricEnabled.value = false;
     } catch (e) {
-      error.value = String(e);
-      throw e;
+      const disableError = e;
+      try {
+        await reconcileBiometricState();
+      } catch {
+        // Fail closed and keep the original operation error.
+      }
+      error.value = String(disableError);
+      throw disableError;
     }
   }
 

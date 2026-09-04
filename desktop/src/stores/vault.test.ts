@@ -23,6 +23,9 @@ describe("vault store", () => {
     vi.clearAllMocks();
     vi.mocked(api.biometricAvailable).mockResolvedValue(false);
     vi.mocked(api.biometricPassphraseStored).mockResolvedValue(false);
+    vi.mocked(api.unlockWithBiometric).mockResolvedValue(true);
+    vi.mocked(api.storeBiometricPassphrase).mockResolvedValue(undefined);
+    vi.mocked(api.clearBiometricPassphrase).mockResolvedValue(undefined);
   });
 
   describe("initial state", () => {
@@ -121,6 +124,62 @@ describe("vault store", () => {
       await expect(store.unlock("wrong")).rejects.toThrow("Wrong passphrase");
       expect(store.unlocked).toBe(false);
       expect(store.error).toBe("Error: Wrong passphrase");
+    });
+  });
+
+  describe("unlockWithBiometric", () => {
+    it("disables biometric UI when the protected credential is gone after a failed unlock", async () => {
+      const store = useVaultStore();
+      store.biometricAvailable = true;
+      store.biometricEnabled = true;
+      vi.mocked(api.unlockWithBiometric).mockRejectedValue(
+        new Error("Touch ID credential invalidated"),
+      );
+      vi.mocked(api.biometricPassphraseStored).mockResolvedValue(false);
+
+      await expect(store.unlockWithBiometric()).rejects.toThrow(
+        "Touch ID credential invalidated",
+      );
+
+      expect(api.biometricPassphraseStored).toHaveBeenCalledTimes(1);
+      expect(store.biometricEnabled).toBe(false);
+      expect(store.error).toBe("Error: Touch ID credential invalidated");
+    });
+
+    it("keeps biometric UI enabled when a failed attempt leaves the credential stored", async () => {
+      const store = useVaultStore();
+      store.biometricAvailable = true;
+      store.biometricEnabled = true;
+      vi.mocked(api.unlockWithBiometric).mockRejectedValue(
+        new Error("Touch ID was canceled by the user"),
+      );
+      vi.mocked(api.biometricPassphraseStored).mockResolvedValue(true);
+
+      await expect(store.unlockWithBiometric()).rejects.toThrow(
+        "Touch ID was canceled by the user",
+      );
+
+      expect(store.biometricEnabled).toBe(true);
+      expect(store.error).toBe("Error: Touch ID was canceled by the user");
+    });
+
+    it("fails closed if the post-failure Keychain probe also fails", async () => {
+      const store = useVaultStore();
+      store.biometricAvailable = true;
+      store.biometricEnabled = true;
+      vi.mocked(api.unlockWithBiometric).mockRejectedValue(
+        new Error("Touch ID authentication failed"),
+      );
+      vi.mocked(api.biometricPassphraseStored).mockRejectedValue(
+        new Error("Keychain unavailable"),
+      );
+
+      await expect(store.unlockWithBiometric()).rejects.toThrow(
+        "Touch ID authentication failed",
+      );
+
+      expect(store.biometricEnabled).toBe(false);
+      expect(store.error).toBe("Error: Touch ID authentication failed");
     });
   });
 
