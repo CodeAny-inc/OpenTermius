@@ -593,7 +593,7 @@ pub async fn read_key_file(path: String) -> ApiResult<String> {
 // Updater
 // ============================================================
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Serialize)]
 pub struct UpdateInfo {
@@ -604,17 +604,126 @@ pub struct UpdateInfo {
     pub body: Option<String>,
 }
 
+/// GitHub API release representation (subset of fields we need).
+#[derive(Debug, Deserialize)]
+struct GithubRelease {
+    tag_name: String,
+    #[serde(default)]
+    #[allow(dead_code)]
+    prerelease: bool,
+    #[serde(default)]
+    assets: Vec<GithubAsset>,
+}
+
+#[derive(Debug, Deserialize)]
+struct GithubAsset {
+    name: String,
+    browser_download_url: String,
+}
+
+/// The GitHub repo to check for releases. Hardcoded for now; could be
+/// made configurable later.
+const GITHUB_API_RELEASES_URL: &str =
+    "https://api.github.com/repos/CodeAny-inc/OpenTermius/releases?per_page=30";
+
+/// Find the URL of the `latest.json` asset from the newest release
+/// (including prereleases). Returns `None` if no releases have one.
+///
+/// We query the GitHub API (which includes prereleases, unlike the
+/// `releases/latest` redirect) and pick the release with the highest
+/// semver version that has a `latest.json` asset.
+async fn find_latest_json_url() -> Result<Option<String>, String> {
+    let client = reqwest::Client::builder()
+        .user_agent("OpenTermius-Updater")
+        .timeout(std::time::Duration::from_secs(15))
+        .build()
+        .map_err(|e| format!("http client: {e}"))?;
+
+    let resp = client
+        .get(GITHUB_API_RELEASES_URL)
+        .header("Accept", "application/vnd.github+json")
+        .send()
+        .await
+        .map_err(|e| format!("github api request: {e}"))?;
+
+    if !resp.status().is_success() {
+        return Err(format!("github api returned {}", resp.status()));
+    }
+
+    let releases: Vec<GithubRelease> = resp
+        .json()
+        .await
+        .map_err(|e| format!("parse github response: {e}"))?;
+
+    // Find the release with the highest semver version that has a latest.json
+    let mut best: Option<(semver::Version, String)> = None;
+    for release in &releases {
+        // Strip leading 'v' from tag name
+        let tag = release.tag_name.trim_start_matches('v');
+        let Ok(version) = semver::Version::parse(tag) else {
+            continue;
+        };
+        // Find the latest.json asset
+        let json_url = release
+            .assets
+            .iter()
+            .find(|a| a.name == "latest.json")
+            .map(|a| a.browser_download_url.clone());
+        let Some(json_url) = json_url else {
+            continue;
+        };
+        match &best {
+            Some((best_ver, _)) if &version <= best_ver => {}
+            _ => best = Some((version, json_url)),
+        }
+    }
+
+    Ok(best.map(|(_, url)| url))
+}
+
+/// Build an updater with a custom endpoint (the latest prerelease's
+/// latest.json URL) and check for updates.
+pub async fn check_with_prerelease_endpoint(
+    app: &AppHandle,
+) -> Result<Option<tauri_plugin_updater::Update>, String> {
+    use tauri_plugin_updater::UpdaterExt;
+
+    let json_url = match find_latest_json_url().await? {
+        Some(url) => url,
+        None => {
+            // No releases with latest.json — fall back to the configured endpoint
+            let updater = app.updater().map_err(|e| e.to_string())?;
+            return updater.check().await.map_err(|e| e.to_string());
+        }
+    };
+
+    tracing::info!("updater: using latest.json from {json_url}");
+
+    let parsed_url: url::Url = json_url
+        .parse()
+        .map_err(|e: url::ParseError| e.to_string())?;
+    let updater = app
+        .updater_builder()
+        .endpoints(vec![parsed_url])
+        .map_err(|e| e.to_string())?
+        .build()
+        .map_err(|e| e.to_string())?;
+
+    updater.check().await.map_err(|e| e.to_string())
+}
+
 /// Check for updates. Returns update info if an update is available.
+///
+/// Unlike the default Tauri updater (which uses `releases/latest` and
+/// thus skips prereleases), this queries the GitHub API to find the
+/// newest release — including prereleases — and uses its `latest.json`.
 #[tauri::command]
 pub async fn check_for_updates(
     app: AppHandle,
 ) -> ApiResult<UpdateInfo> {
-    use tauri_plugin_updater::UpdaterExt;
-
-    let updater = app.updater().map_err(|e| e.to_string())?;
     let current = app.package_info().version.to_string();
 
-    match updater.check().await {
+    match check_with_prerelease_endpoint(&app).await {
         Ok(Some(update)) => Ok(UpdateInfo {
             available: true,
             version: update.version.clone(),
@@ -629,7 +738,10 @@ pub async fn check_for_updates(
             date: None,
             body: None,
         }),
-        Err(e) => Err(e.to_string()),
+        Err(e) => {
+            tracing::warn!("update check failed: {e}");
+            Err(e)
+        }
     }
 }
 
@@ -639,12 +751,7 @@ pub async fn check_for_updates(
 pub async fn install_update(
     app: AppHandle,
 ) -> ApiResult<()> {
-    use tauri_plugin_updater::UpdaterExt;
-
-    let updater = app.updater().map_err(|e| e.to_string())?;
-
-    let update = updater
-        .check()
+    let update = check_with_prerelease_endpoint(&app)
         .await
         .map_err(|e| e.to_string())?
         .ok_or("No update available")?;

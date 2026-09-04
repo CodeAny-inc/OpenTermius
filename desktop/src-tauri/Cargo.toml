@@ -25,6 +25,9 @@ thiserror = { workspace = true }
 zeroize = { workspace = true }
 portable-pty = "0.9"
 uuid = { workspace = true }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
+semver = "1"
+url = "2"
 
 [features]
 custom-protocol = ["tauri/custom-protocol"]

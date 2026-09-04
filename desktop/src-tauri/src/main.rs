@@ -96,19 +96,12 @@ fn main() {
 
 /// Silent background check — emits an event to the frontend if an update
 /// is available, so the UI can show a banner. Does not auto-install.
+///
+/// Uses the custom prerelease-aware check (queries GitHub API for all
+/// releases including prereleases, picks the highest semver version).
 #[cfg(not(debug_assertions))]
 async fn check_for_updates_silent(app: tauri::AppHandle) {
-    use tauri_plugin_updater::UpdaterExt;
-
-    let updater = match app.updater() {
-        Ok(u) => u,
-        Err(e) => {
-            tracing::warn!("updater not available: {e}");
-            return;
-        }
-    };
-
-    match updater.check().await {
+    match commands::check_with_prerelease_endpoint(&app).await {
         Ok(Some(update)) => {
             tracing::info!(
                 "update available: v{} (current: {})",
@@ -121,9 +114,6 @@ async fn check_for_updates_silent(app: tauri::AppHandle) {
                 "date": update.date.map(|d| d.to_string()),
                 "body": update.body,
             }));
-            // Stash the update object in app state for later install
-            // (We can't store it directly, so the frontend will re-check
-            //  via the check_for_updates command when the user clicks "Update")
         }
         Ok(None) => {
             tracing::debug!("no update available");
