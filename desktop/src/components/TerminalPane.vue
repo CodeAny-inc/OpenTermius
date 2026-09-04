@@ -18,6 +18,7 @@ import {
   GripVertical,
   Maximize2,
   Minimize2,
+  RotateCw,
 } from "lucide-vue-next";
 import type { UnlistenFn } from "@tauri-apps/api/event";
 
@@ -115,13 +116,14 @@ onMounted(async () => {
   unlistenClosed = await api.onSessionClosed((event) => {
     if (event.session_id === sessionId && term) {
       term.write(`\r\n\x1b[31m[session closed: ${event.reason}]\x1b[0m\r\n`);
+      tabs.setPaneDisconnected(props.pane.id);
     }
   });
 
   term.onData((data) => {
-    if (sessionId) {
+    if (currentSessionId) {
       const bytes = Array.from(new TextEncoder().encode(data));
-      api.sessionWrite(sessionId, bytes);
+      api.sessionWrite(currentSessionId, bytes);
     }
   });
 
@@ -131,8 +133,8 @@ onMounted(async () => {
     if (fitAddon && term) {
       try {
         fitAddon.fit();
-        if (sessionId) {
-          api.sessionResize(sessionId, term.cols, term.rows);
+        if (currentSessionId) {
+          api.sessionResize(currentSessionId, term.cols, term.rows);
         }
       } catch (e) {
         // Ignore resize errors during teardown
@@ -218,6 +220,47 @@ async function connectSession(sessionId: string) {
       term?.write(`\x1b[31mConnection failed: ${e}\x1b[0m\r\n`);
     }
   }
+}
+
+// Reconnect: close old session, clear terminal, create new session
+async function reconnect() {
+  if (!term) return;
+
+  // Close the old session if it still exists
+  if (currentSessionId) {
+    api.closeSession(currentSessionId).catch(() => {});
+  }
+
+  // Clear the terminal
+  term.reset();
+
+  // Generate a new session ID and re-register event listeners
+  const newSessionId = crypto.randomUUID();
+  currentSessionId = newSessionId;
+
+  // Remove old listeners
+  if (unlistenData) unlistenData();
+  if (unlistenClosed) unlistenClosed();
+
+  // Register new listeners for the new session
+  unlistenData = await api.onSessionData((event) => {
+    if (event.session_id === newSessionId && term) {
+      const data = new Uint8Array(event.data);
+      term.write(data);
+    }
+  });
+
+  unlistenClosed = await api.onSessionClosed((event) => {
+    if (event.session_id === newSessionId && term) {
+      term.write(`\r\n\x1b[31m[session closed: ${event.reason}]\x1b[0m\r\n`);
+      tabs.setPaneDisconnected(props.pane.id);
+    }
+  });
+
+  // Re-wire data input to the new session
+  // (term.onData handler from onMounted still references the old sessionId
+  //  via closure, so we need a new approach — use a ref-like pattern)
+  await connectSession(newSessionId);
 }
 
 // --- Focus handling ---
@@ -374,6 +417,15 @@ function onDrop(e: DragEvent) {
       </span>
       <div class="flex items-center gap-0.5">
         <button
+          v-if="!pane.connected && !isFullscreen"
+          class="flex h-5 w-5 items-center justify-center rounded text-muted-foreground hover:text-green-500 hover:bg-sidebar-accent transition-colors duration-100"
+          aria-label="Reconnect"
+          title="Reconnect"
+          @click.stop="reconnect"
+        >
+          <RotateCw class="size-3" :stroke-width="1.75" />
+        </button>
+        <button
           class="flex h-5 w-5 items-center justify-center rounded text-muted-foreground hover:bg-sidebar-accent hover:text-foreground transition-colors duration-100"
           :aria-label="isFullscreen ? 'Exit fullscreen' : 'Fullscreen'"
           :title="isFullscreen ? 'Exit fullscreen (Esc)' : 'Fullscreen'"
@@ -413,6 +465,24 @@ function onDrop(e: DragEvent) {
 
     <!-- Terminal body -->
     <div ref="containerRef" class="flex-1 overflow-hidden bg-black"></div>
+
+    <!-- Disconnected overlay with reconnect button -->
+    <div
+      v-if="!pane.connected && connectionAttempted"
+      class="absolute inset-0 top-6 z-10 flex items-center justify-center bg-black/60 pointer-events-auto"
+    >
+      <div class="flex flex-col items-center gap-2">
+        <Circle class="size-6 text-muted-foreground" :stroke-width="1.5" />
+        <span class="text-sm text-muted-foreground">Disconnected</span>
+        <button
+          class="flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-primary text-primary-foreground text-xs font-medium hover:bg-primary/90 transition-colors"
+          @click.stop="reconnect"
+        >
+          <RotateCw class="size-3.5" :stroke-width="2" />
+          Reconnect
+        </button>
+      </div>
+    </div>
 
     <!-- Drop zone overlay (shown when dragging over this pane) -->
     <div

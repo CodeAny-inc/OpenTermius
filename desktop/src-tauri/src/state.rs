@@ -24,7 +24,23 @@ pub struct AppState {
 pub struct LocalTerminal {
     pub writer: Box<dyn std::io::Write + Send>,
     pub master: Box<dyn portable_pty::MasterPty + Send>,
-    pub _child: Box<dyn portable_pty::Child + Send + Sync>,
+    pub child: Box<dyn portable_pty::Child + Send + Sync>,
+}
+
+impl LocalTerminal {
+    /// Kill the child process and wait for it to exit.
+    pub fn kill(&mut self) {
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+    }
+}
+
+impl Drop for LocalTerminal {
+    fn drop(&mut self) {
+        // Ensure the child process is terminated when the terminal is dropped
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+    }
 }
 
 impl AppState {

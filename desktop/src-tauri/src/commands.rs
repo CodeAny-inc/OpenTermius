@@ -423,7 +423,13 @@ pub async fn create_local_terminal(
     });
 
     let mut cmd = CommandBuilder::new(&shell);
+    // Run as a login shell for proper environment setup
+    cmd.arg("-l");
     cmd.env("TERM", "xterm-256color");
+    // Set a reasonable working directory
+    if let Some(home) = std::env::var_os("HOME") {
+        cmd.cwd(home);
+    }
 
     let child = pair
         .slave
@@ -445,6 +451,8 @@ pub async fn create_local_terminal(
     // Drop the slave so the child process owns the only slave fd.
     // On Unix this is the correct pattern — the child has its own copy.
     drop(pair.slave);
+
+    tracing::info!("local terminal created: session={session_id}, shell={shell}");
 
     // Spawn a reading thread that emits data events
     let app_handle = app.clone();
@@ -468,9 +476,13 @@ pub async fn create_local_terminal(
                     std::thread::sleep(std::time::Duration::from_millis(10));
                     continue;
                 }
-                Err(_) => break,
+                Err(ref e) => {
+                    tracing::warn!("local terminal read error: {e}");
+                    break;
+                }
             }
         }
+        tracing::info!("local terminal reader ended: session={sid}");
         let _ = app_handle.emit(
             "session-closed",
             crate::state::SessionClosedEvent {
@@ -488,7 +500,7 @@ pub async fn create_local_terminal(
         LocalTerminal {
             writer,
             master,
-            _child: child,
+            child,
         },
     );
 
@@ -553,9 +565,12 @@ pub async fn close_session(
     if state.sessions.list().await.contains(&session_id) {
         return state.sessions.close(&session_id).await.map_err(err);
     }
-    // Try local terminal
+    // Try local terminal — kill the child process
     let mut locals = state.local_terminals.lock().await;
-    locals.remove(&session_id);
+    if let Some(mut term) = locals.remove(&session_id) {
+        term.kill();
+        tracing::info!("local terminal closed: session={session_id}");
+    }
     Ok(())
 }
 

@@ -109,6 +109,7 @@ jobs:
           args: ${{ matrix.args }}
 
       - name: Upload .sig files to release
+        shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ needs.prepare.outputs.tag }}
@@ -122,10 +123,15 @@ jobs:
             BUNDLE_DIR="$BUNDLE_DIR/release/bundle"
           fi
           echo "Looking for .sig files in $BUNDLE_DIR"
+          if [ ! -d "$BUNDLE_DIR" ]; then
+            echo "Bundle directory not found, skipping"
+            exit 0
+          fi
           find "$BUNDLE_DIR" -name "*.sig" -type f | while read -r sigfile; do
             echo "Uploading: $sigfile"
             gh release upload "$TAG" "$sigfile" --clobber
           done
+          echo "Done uploading .sig files"
 
   # ──────────────────────────────────────────────
   # Generate and upload latest.json (update manifest)

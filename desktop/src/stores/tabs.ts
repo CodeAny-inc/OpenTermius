@@ -183,6 +183,17 @@ export const useTabsStore = defineStore("tabs", () => {
     }));
   }
 
+  function setPaneDisconnected(paneIdStr: string) {
+    const tab = tabs.value.find((t) =>
+      findPaneInTree(t.tree, paneIdStr) !== null,
+    );
+    if (!tab) return;
+    tab.tree = updatePaneInTree(tab.tree, paneIdStr, (p) => ({
+      ...p,
+      connected: false,
+    }));
+  }
+
   function setPaneTitle(paneIdStr: string, title: string) {
     const tab = activeTab.value;
     if (!tab) return;
@@ -383,6 +394,7 @@ export const useTabsStore = defineStore("tabs", () => {
     splitPane,
     closePane,
     setPaneConnected,
+    setPaneDisconnected,
     setPaneTitle,
     setRatio,
     firstPane,
