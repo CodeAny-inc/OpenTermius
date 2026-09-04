@@ -5,16 +5,16 @@ use tauri::State;
 type ApiResult<T> = std::result::Result<T, String>;
 
 /// Keychain service and account identifiers for the stored vault passphrase.
-#[cfg(target_os = "macos")]
+#[cfg(all(target_os = "macos", feature = "macos-biometric"))]
 const SERVICE: &str = "com.opentermius.vault";
-#[cfg(target_os = "macos")]
+#[cfg(all(target_os = "macos", feature = "macos-biometric"))]
 const ACCOUNT: &str = "master-passphrase";
 
 // ============================================================
 // macOS implementation — Touch ID via Security framework
 // ============================================================
 
-#[cfg(target_os = "macos")]
+#[cfg(all(target_os = "macos", feature = "macos-biometric"))]
 mod macos {
     use super::{ACCOUNT, SERVICE};
     use core_foundation::base::TCFType;
@@ -94,8 +94,10 @@ mod macos {
     }
 
     /// Store the passphrase in the Data Protection Keychain with biometric
-    /// (Touch ID) access control. The passphrase can only be retrieved after
-    /// the user successfully authenticates with Touch ID.
+    /// (Touch ID) access control. `BIOMETRY_CURRENT_SET` binds the credential
+    /// to the Touch ID enrollment that exists at enable time, so adding or
+    /// removing fingerprints invalidates the stored passphrase and requires
+    /// the user to re-enable biometric unlock with the master passphrase.
     pub fn store_passphrase(passphrase: &str) -> Result<(), String> {
         // Access-control attributes cannot be safely changed with a generic
         // update, so replace any existing protected item atomically from the
@@ -103,7 +105,7 @@ mod macos {
         delete_if_present()?;
 
         let mut options = password_options();
-        options.set_access_control_options(AccessControlOptions::BIOMETRY_ANY);
+        options.set_access_control_options(AccessControlOptions::BIOMETRY_CURRENT_SET);
 
         passwords::set_generic_password_options(passphrase.as_bytes(), options)
             .map_err(format_keychain_error)
@@ -156,10 +158,13 @@ mod macos {
 }
 
 // ============================================================
-// Non-macOS stub — biometric unlock unavailable
+// Stub — biometric unlock unavailable
 // ============================================================
 
-#[cfg(not(target_os = "macos"))]
+// The stub is used on non-macOS platforms and on ordinary/ad-hoc-signed macOS
+// builds. `macos-biometric` is intentionally opt-in until the release pipeline
+// provides valid Apple signing and Data Protection Keychain entitlements.
+#[cfg(not(all(target_os = "macos", feature = "macos-biometric")))]
 mod stub {
     pub fn biometry_available() -> bool {
         false
@@ -168,26 +173,27 @@ mod stub {
         Ok(false)
     }
     pub fn store_passphrase(_passphrase: &str) -> Result<(), String> {
-        Err("biometric unlock is not available on this platform".into())
+        Err("biometric unlock is not available in this build".into())
     }
     pub fn retrieve_passphrase() -> Result<zeroize::Zeroizing<String>, String> {
-        Err("biometric unlock is not available on this platform".into())
+        Err("biometric unlock is not available in this build".into())
     }
     pub fn clear_passphrase() -> Result<(), String> {
-        Err("biometric unlock is not available on this platform".into())
+        Err("biometric unlock is not available in this build".into())
     }
 }
 
-#[cfg(target_os = "macos")]
+#[cfg(all(target_os = "macos", feature = "macos-biometric"))]
 use macos as platform;
-#[cfg(not(target_os = "macos"))]
+#[cfg(not(all(target_os = "macos", feature = "macos-biometric")))]
 use stub as platform;
 
 // ============================================================
 // Tauri commands
 // ============================================================
 
-/// Returns `true` when this Mac can currently evaluate Touch ID.
+/// Returns `true` when this build enables biometric support and this Mac can
+/// currently evaluate Touch ID. Ordinary/ad-hoc-signed builds return `false`.
 #[tauri::command]
 pub async fn biometric_available() -> ApiResult<bool> {
     Ok(platform::biometry_available())
@@ -219,9 +225,10 @@ pub async fn store_biometric_passphrase(
     platform::store_passphrase(passphrase.as_str())
 }
 
-/// Unlock the vault by retrieving the passphrase from the keychain. On macOS
-/// this triggers the Touch ID prompt. The blocking OS call runs off the async
-/// runtime so the application stays responsive while authentication is open.
+/// Unlock the vault by retrieving the passphrase from the keychain. On an
+/// enabled macOS build this triggers the Touch ID prompt. The blocking OS call
+/// runs off the async runtime so the application stays responsive while
+/// authentication is open.
 #[tauri::command]
 pub async fn unlock_with_biometric(state: State<'_, Arc<AppState>>) -> ApiResult<bool> {
     let passphrase = tokio::task::spawn_blocking(platform::retrieve_passphrase)
