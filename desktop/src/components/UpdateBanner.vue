@@ -30,6 +30,19 @@ onMounted(async () => {
   unlistenExtracting = await api.onUpdateExtracting(() => {
     extracting.value = true;
   });
+
+  // Also explicitly check for updates after mount — the backend's
+  // startup check may emit the event before this listener is registered
+  // (race condition), so we do our own check here as well.
+  try {
+    const info = await api.checkForUpdates();
+    if (info.available && !dismissed.value) {
+      updateInfo.value = info;
+      show.value = true;
+    }
+  } catch (e) {
+    console.error("Update check failed:", e);
+  }
 });
 
 onUnmounted(() => {

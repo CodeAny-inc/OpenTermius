@@ -36,6 +36,9 @@ fn main() {
             {
                 let handle = app.handle().clone();
                 tauri::async_runtime::spawn(async move {
+                    // Small delay to let the frontend mount and register
+                    // its event listeners before we emit update events
+                    tokio::time::sleep(std::time::Duration::from_secs(2)).await;
                     check_for_updates_silent(handle).await;
                 });
             }
