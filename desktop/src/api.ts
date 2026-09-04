@@ -121,3 +121,45 @@ export function onSessionClosed(
     cb(event.payload),
   );
 }
+
+// --- updater ---
+export interface UpdateInfo {
+  available: boolean;
+  version: string;
+  current_version: string;
+  date: string | null;
+  body: string | null;
+}
+
+export interface UpdateProgress {
+  chunk_length: number;
+  content_length: number | null;
+}
+
+export const checkForUpdates = () =>
+  invoke<UpdateInfo>("check_for_updates");
+
+export const installUpdate = () =>
+  invoke<void>("install_update");
+
+export function onUpdateAvailable(
+  cb: (e: UpdateInfo) => void,
+): Promise<UnlistenFn> {
+  return listen<UpdateInfo>("update-available", (event) =>
+    cb(event.payload),
+  );
+}
+
+export function onUpdateProgress(
+  cb: (e: UpdateProgress) => void,
+): Promise<UnlistenFn> {
+  return listen<UpdateProgress>("update-progress", (event) =>
+    cb(event.payload),
+  );
+}
+
+export function onUpdateExtracting(
+  cb: () => void,
+): Promise<UnlistenFn> {
+  return listen("update-extracting", () => cb());
+}
