@@ -1,4 +1,5 @@
 use opentermius_core::host::{AuthMethod, Host, HostGroup};
+use opentermius_core::identity::Identity;
 use opentermius_core::keys::{generate_ed25519, parse_openssh_private};
 use opentermius_core::store::Store;
 use opentermius_core::vault::Vault;
@@ -342,4 +343,94 @@ fn test_workspace_new() {
     assert_eq!(ws.name, "My Workspace");
     assert!(ws.tabs.is_empty());
     assert!(ws.icon.is_none());
+}
+
+// ============================================================
+// Identity tests
+// ============================================================
+
+#[test]
+fn test_identity_new() {
+    let id = Identity::new("Work Admin", "admin");
+    assert_eq!(id.label, "Work Admin");
+    assert_eq!(id.username, "admin");
+    assert_eq!(id.auth, AuthMethod::Agent);
+    assert!(id.key_id.is_none());
+    assert!(id.tags.is_empty());
+}
+
+#[test]
+fn test_identity_serialization() {
+    let id = Identity::new("Test", "root");
+    let json = serde_json::to_string(&id).unwrap();
+    let deserialized: Identity = serde_json::from_str(&json).unwrap();
+    assert_eq!(deserialized.label, "Test");
+    assert_eq!(deserialized.username, "root");
+}
+
+#[test]
+fn test_store_add_and_list_identity() {
+    let dir = temp_dir();
+    let mut store = Store::load(dir.path().join("store.json")).expect("load store");
+
+    let id = Identity::new("Work Admin", "admin");
+    let id_id = id.id;
+    store.add_identity(id).expect("add identity");
+
+    assert_eq!(store.identities().len(), 1);
+    assert_eq!(store.identities()[0].id, id_id);
+    assert_eq!(store.identities()[0].label, "Work Admin");
+}
+
+#[test]
+fn test_store_update_identity() {
+    let dir = temp_dir();
+    let mut store = Store::load(dir.path().join("store.json")).expect("load store");
+
+    let mut id = Identity::new("Original", "user");
+    store.add_identity(id.clone()).expect("add identity");
+
+    id.label = "Updated".to_string();
+    store.update_identity(id).expect("update identity");
+
+    assert_eq!(store.identities().len(), 1);
+    assert_eq!(store.identities()[0].label, "Updated");
+}
+
+#[test]
+fn test_store_remove_identity_clears_host_refs() {
+    let dir = temp_dir();
+    let mut store = Store::load(dir.path().join("store.json")).expect("load store");
+
+    let id = Identity::new("Work Admin", "admin");
+    let id_id = id.id;
+    store.add_identity(id).expect("add identity");
+
+    // Add a host that references this identity
+    let mut host = Host::new("Server", "host.com", 22, "user");
+    host.identity_id = Some(id_id);
+    store.add_host(host).expect("add host");
+
+    assert_eq!(store.identities().len(), 1);
+    assert!(store.hosts()[0].identity_id.is_some());
+
+    // Remove identity — host's identity_id should be cleared
+    store.remove_identity(id_id).expect("remove identity");
+    assert!(store.identities().is_empty());
+    assert!(store.hosts()[0].identity_id.is_none());
+}
+
+#[test]
+fn test_identity_persistence() {
+    let dir = temp_dir();
+    let path = dir.path().join("store.json");
+
+    let mut store = Store::load(path.clone()).expect("load store");
+    store
+        .add_identity(Identity::new("Persisted", "root"))
+        .expect("add identity");
+
+    let reloaded = Store::load(path).expect("reload store");
+    assert_eq!(reloaded.identities().len(), 1);
+    assert_eq!(reloaded.identities()[0].label, "Persisted");
 }

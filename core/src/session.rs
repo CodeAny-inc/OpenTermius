@@ -50,6 +50,7 @@ impl SessionManager {
         &self,
         session_id: String,
         host: &Host,
+        identity: Option<&crate::identity::Identity>,
         known_hosts: Arc<Mutex<KnownHosts>>,
         vault: Option<&Vault>,
         passphrase: Option<&str>,
@@ -57,7 +58,8 @@ impl SessionManager {
         cols: u32,
         rows: u32,
     ) -> Result<()> {
-        let handle = connection::connect(host, known_hosts, vault, passphrase, password).await?;
+        let handle =
+            connection::connect(host, identity, known_hosts, vault, passphrase, password).await?;
         let channel = handle.channel_open_session().await.map_err(|e| {
             CoreError::Ssh(format!("channel open: {e}"))
         })?;

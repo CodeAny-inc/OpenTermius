@@ -52,6 +52,11 @@ fn main() {
             commands::list_groups,
             commands::add_group,
             commands::delete_group,
+            // identities
+            commands::list_identities,
+            commands::add_identity,
+            commands::update_identity,
+            commands::delete_identity,
             // vault
             commands::vault_is_initialized,
             commands::initialize_vault,

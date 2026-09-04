@@ -17,6 +17,7 @@
 pub mod connection;
 pub mod error;
 pub mod host;
+pub mod identity;
 pub mod keys;
 pub mod known_hosts;
 pub mod session;

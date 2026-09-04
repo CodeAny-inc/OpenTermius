@@ -1,5 +1,6 @@
 use crate::state::{AppState, LocalTerminal};
 use opentermius_core::host::{AuthMethod, Host, HostGroup};
+use opentermius_core::identity::Identity;
 use opentermius_core::keys::{generate_ed25519, parse_openssh_private, KeyMeta};
 use opentermius_core::workspace::Workspace;
 use std::sync::Arc;
@@ -79,6 +80,45 @@ pub async fn delete_group(
 ) -> ApiResult<()> {
     let mut store = state.store.lock().await;
     store.remove_group(id).map_err(err)
+}
+
+// ============================================================
+// Identities
+// ============================================================
+
+#[tauri::command]
+pub async fn list_identities(state: State<'_, Arc<AppState>>) -> ApiResult<Vec<Identity>> {
+    let store = state.store.lock().await;
+    Ok(store.identities().to_vec())
+}
+
+#[tauri::command]
+pub async fn add_identity(
+    state: State<'_, Arc<AppState>>,
+    identity: Identity,
+) -> ApiResult<Identity> {
+    let mut store = state.store.lock().await;
+    store.add_identity(identity.clone()).map_err(err)?;
+    Ok(identity)
+}
+
+#[tauri::command]
+pub async fn update_identity(
+    state: State<'_, Arc<AppState>>,
+    identity: Identity,
+) -> ApiResult<Identity> {
+    let mut store = state.store.lock().await;
+    store.update_identity(identity.clone()).map_err(err)?;
+    Ok(identity)
+}
+
+#[tauri::command]
+pub async fn delete_identity(
+    state: State<'_, Arc<AppState>>,
+    id: Uuid,
+) -> ApiResult<()> {
+    let mut store = state.store.lock().await;
+    store.remove_identity(id).map_err(err)
 }
 
 // ============================================================
@@ -312,12 +352,27 @@ pub async fn connect_ssh(
         let pw = state.passphrase.lock().await;
         pw.as_ref().map(|p| p.to_string())
     };
-    let vault = state.vault.lock().await;
-    let vault_ref = if matches!(host.auth, AuthMethod::PublicKey) {
-        Some(&*vault)
+
+    // Resolve identity if the host references one
+    let identity = if let Some(identity_id) = host.identity_id {
+        let store = state.store.lock().await;
+        store
+            .data()
+            .identities
+            .iter()
+            .find(|i| i.id == identity_id)
+            .cloned()
     } else {
         None
     };
+
+    // Determine if we need the vault (publickey auth from host or identity)
+    let needs_vault = match identity.as_ref() {
+        Some(id) => matches!(id.auth, AuthMethod::PublicKey),
+        None => matches!(host.auth, AuthMethod::PublicKey),
+    };
+    let vault = state.vault.lock().await;
+    let vault_ref = if needs_vault { Some(&*vault) } else { None };
     let known_hosts = state.known_hosts.clone();
     let cols = cols.unwrap_or(80);
     let rows = rows.unwrap_or(24);
@@ -327,6 +382,7 @@ pub async fn connect_ssh(
         .create_ssh_session(
             session_id,
             &host,
+            identity.as_ref(),
             known_hosts,
             vault_ref,
             passphrase.as_deref(),

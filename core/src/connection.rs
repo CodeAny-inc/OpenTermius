@@ -1,4 +1,5 @@
 use crate::host::{AuthMethod, Host};
+use crate::identity::Identity;
 use crate::known_hosts::KnownHosts;
 use crate::vault::Vault;
 use crate::{CoreError, Result};
@@ -39,13 +40,24 @@ impl client::Handler for SshHandler {
 
 /// Open an authenticated SSH session and return the handle.
 /// The caller is responsible for opening a channel and starting the shell.
+///
+/// If the host has an `identity_id`, the identity (if provided) is used to
+/// resolve the username, auth method, and key — overriding the host's own
+/// fields. This allows reusable identities like Termius.
 pub async fn connect(
     host: &Host,
+    identity: Option<&Identity>,
     known_hosts: Arc<Mutex<KnownHosts>>,
     vault: Option<&Vault>,
     passphrase: Option<&str>,
     password: Option<&str>,
 ) -> Result<Handle<SshHandler>> {
+    // Resolve effective username, auth, and key from identity if present
+    let (username, auth, key_id) = match identity {
+        Some(id) => (&id.username, &id.auth, id.key_id),
+        None => (&host.username, &host.auth, host.key_id),
+    };
+
     let config = Arc::new(Config::default());
     let handler = SshHandler {
         host: host.hostname.clone(),
@@ -58,20 +70,20 @@ pub async fn connect(
         .await
         .map_err(|e| CoreError::Ssh(format!("connect {addr}: {e}")))?;
 
-    let auth_ok = match &host.auth {
+    let auth_ok = match auth {
         AuthMethod::Agent => {
             // Agent auth: try with the agent. For now, fall back to none.
             // Full agent support requires connecting to the SSH agent socket.
-            session.authenticate_password(&host.username, "").await
+            session.authenticate_password(username, "").await
         }
         AuthMethod::Password { .. } => {
             let pw = password.ok_or_else(|| {
                 CoreError::InvalidInput("password required but not provided".into())
             })?;
-            session.authenticate_password(&host.username, pw).await
+            session.authenticate_password(username, pw).await
         }
         AuthMethod::PublicKey => {
-            let key_id = host.key_id.ok_or_else(|| {
+            let key_id = key_id.ok_or_else(|| {
                 CoreError::InvalidInput("publickey auth but no key_id set".into())
             })?;
             let passphrase = passphrase.ok_or_else(|| {
@@ -86,7 +98,7 @@ pub async fn connect(
             let pair = decode_secret_key(&pem_str, None)
                 .map_err(|e| CoreError::Key(format!("decode: {e}")))?;
             session
-                .authenticate_publickey(&host.username, Arc::new(pair))
+                .authenticate_publickey(username, Arc::new(pair))
                 .await
         }
     }

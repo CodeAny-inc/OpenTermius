@@ -23,6 +23,10 @@ pub struct Host {
     pub proxy_command: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub jump_host_id: Option<Uuid>,
+    /// Optional reference to an Identity. When set, the username and auth
+    /// method are resolved from the identity at connect time.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub identity_id: Option<Uuid>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -62,6 +66,7 @@ impl Host {
             startup_command: None,
             proxy_command: None,
             jump_host_id: None,
+            identity_id: None,
         }
     }
 }

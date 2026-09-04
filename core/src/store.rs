@@ -1,10 +1,11 @@
 use crate::host::{Host, HostGroup};
+use crate::identity::Identity;
 use crate::workspace::Workspace;
 use crate::Result;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
-/// Persistent store for non-secret data: hosts, host groups, workspaces.
+/// Persistent store for non-secret data: hosts, host groups, identities, workspaces.
 /// Secrets (private keys) live in the vault; passwords live in the OS keychain.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct StoreData {
@@ -12,6 +13,8 @@ pub struct StoreData {
     pub hosts: Vec<Host>,
     #[serde(default)]
     pub host_groups: Vec<HostGroup>,
+    #[serde(default)]
+    pub identities: Vec<Identity>,
     #[serde(default)]
     pub workspaces: Vec<Workspace>,
     #[serde(skip_serializing_if = "Option::is_none", default)]
@@ -87,6 +90,39 @@ impl Store {
 
     pub fn groups(&self) -> &[HostGroup] {
         &self.data.host_groups
+    }
+
+    // --- identities ---
+    pub fn add_identity(&mut self, identity: Identity) -> Result<()> {
+        self.data.identities.push(identity);
+        self.save()
+    }
+
+    pub fn update_identity(&mut self, identity: Identity) -> Result<()> {
+        if let Some(i) = self
+            .data
+            .identities
+            .iter_mut()
+            .find(|i| i.id == identity.id)
+        {
+            *i = identity;
+        }
+        self.save()
+    }
+
+    pub fn remove_identity(&mut self, id: uuid::Uuid) -> Result<()> {
+        self.data.identities.retain(|i| i.id != id);
+        // Unset identity_id on any hosts that referenced it
+        self.data.hosts.iter_mut().for_each(|h| {
+            if h.identity_id == Some(id) {
+                h.identity_id = None;
+            }
+        });
+        self.save()
+    }
+
+    pub fn identities(&self) -> &[Identity] {
+        &self.data.identities
     }
 
     // --- workspaces ---
