@@ -115,12 +115,12 @@ async function browseForKeyFile() {
 <template>
   <div class="flex flex-col h-full overflow-hidden">
     <!-- Header -->
-    <div class="flex h-11 items-center gap-2 border-b border-border px-4">
-      <h2 class="text-[14px] font-semibold">SSH Keys</h2>
-      <div class="ml-auto">
+    <div class="flex h-11 items-center gap-2 border-b border-border px-4 pl-12 md:pl-4">
+      <h2 class="text-[14px] font-semibold truncate">SSH Keys</h2>
+      <div class="ml-auto shrink-0">
         <Button size="sm" @click="showAdd = true">
           <Plus class="size-3.5" :stroke-width="1.75" />
-          Add Key
+          <span class="hidden sm:inline">Add Key</span>
         </Button>
       </div>
     </div>

@@ -94,11 +94,11 @@ onUnmounted(() => {
 
 <template>
   <!-- Tab bar (hidden when a pane is fullscreen) -->
-  <div v-show="!ui.fullscreenPaneId" class="flex h-11 items-center gap-0.5 border-b border-border bg-sidebar px-1.5 overflow-x-auto">
+  <div v-show="!ui.fullscreenPaneId" class="flex h-11 items-center gap-0.5 border-b border-border bg-sidebar px-1.5 pl-11 md:pl-1.5 overflow-x-auto">
     <div
       v-for="tab in tabs.tabs"
       :key="tab.id"
-      class="group flex h-8 items-center gap-1.5 rounded-md px-2.5 text-[12px] cursor-pointer transition-colors duration-100 relative"
+      class="group flex h-8 items-center gap-1.5 rounded-md px-2 sm:px-2.5 text-[12px] cursor-pointer transition-colors duration-100 relative shrink-0"
       :class="cn(
         tab.id === tabs.activeTabId
           ? 'bg-background text-foreground'
@@ -113,8 +113,8 @@ onUnmounted(() => {
       @dragover="onTabDragOver($event, tab.id)"
       @drop="onTabDrop($event, tab.id)"
     >
-      <GripHorizontal class="size-3 text-muted-foreground/40 opacity-0 group-hover:opacity-100 transition-opacity" :stroke-width="1.75" />
-      <span class="truncate max-w-[120px]">{{ tab.title }}</span>
+      <GripHorizontal class="size-3 text-muted-foreground/40 opacity-0 group-hover:opacity-100 transition-opacity hidden sm:block" :stroke-width="1.75" />
+      <span class="truncate max-w-[80px] sm:max-w-[120px]">{{ tab.title }}</span>
       <button
         class="opacity-0 group-hover:opacity-100 transition-opacity rounded p-0.5 hover:bg-muted"
         @click.stop="closeTab(tab.id)"
@@ -123,7 +123,7 @@ onUnmounted(() => {
         <X class="size-3" :stroke-width="1.75" />
       </button>
     </div>
-    <div class="ml-auto px-1">
+    <div class="ml-auto px-1 shrink-0">
       <button
         class="flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-sidebar-accent hover:text-foreground transition-colors duration-100"
         @click="newTab"

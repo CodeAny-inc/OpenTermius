@@ -60,12 +60,12 @@ async function lock() {
 <template>
   <div class="flex flex-col h-full overflow-hidden">
     <!-- Header -->
-    <div class="flex h-11 items-center gap-2 border-b border-border px-4">
+    <div class="flex h-11 items-center gap-2 border-b border-border px-4 pl-12 md:pl-4">
       <h2 class="text-[14px] font-semibold">Vault</h2>
     </div>
 
     <!-- Content -->
-    <div class="flex-1 overflow-y-auto p-6">
+    <div class="flex-1 overflow-y-auto p-4 sm:p-6">
       <div class="max-w-[480px] mx-auto">
         <!-- Status card -->
         <div class="flex items-center gap-3 rounded-lg border border-border bg-card p-4 mb-6">

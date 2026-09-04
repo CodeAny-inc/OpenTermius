@@ -155,16 +155,19 @@ function authLabel(host: Host): string {
 <template>
   <div class="flex flex-col h-full overflow-hidden">
     <!-- Header -->
-    <div class="flex h-11 items-center gap-2 border-b border-border px-4">
-      <h2 class="text-[14px] font-semibold">Hosts</h2>
-      <div class="ml-auto flex items-center gap-2">
-        <Button size="sm" variant="ghost" @click="showGroupForm = true">
+    <div class="flex h-11 items-center gap-2 border-b border-border px-4 pl-12 md:pl-4">
+      <h2 class="text-[14px] font-semibold truncate">Hosts</h2>
+      <div class="ml-auto flex items-center gap-1.5 sm:gap-2 shrink-0">
+        <Button size="sm" variant="ghost" class="hidden sm:inline-flex" @click="showGroupForm = true">
           <FolderPlus class="size-3.5" :stroke-width="1.75" />
-          New Group
+          <span class="hidden sm:inline">New Group</span>
+        </Button>
+        <Button size="sm" variant="ghost" class="sm:hidden" @click="showGroupForm = true">
+          <FolderPlus class="size-3.5" :stroke-width="1.75" />
         </Button>
         <Button size="sm" @click="addHost">
           <Plus class="size-3.5" :stroke-width="1.75" />
-          Add Host
+          <span class="hidden sm:inline">Add Host</span>
         </Button>
       </div>
     </div>
@@ -228,7 +231,7 @@ function authLabel(host: Host): string {
         <div
           v-for="host in hosts.filteredHosts"
           :key="host.id"
-          class="group flex h-10 items-center gap-2.5 rounded-md px-2 cursor-pointer transition-colors duration-100"
+          class="group flex h-10 items-center gap-2 sm:gap-2.5 rounded-md px-2 cursor-pointer transition-colors duration-100"
           :class="selectedHostId === host.id ? 'bg-accent' : 'hover:bg-muted'"
           tabindex="0"
           @click="onHostClick(host)"
@@ -249,12 +252,12 @@ function authLabel(host: Host): string {
           <!-- Auth method badge -->
           <Badge
             v-if="host.identity_id"
-            class="opacity-60 group-hover:opacity-100"
+            class="opacity-60 group-hover:opacity-100 hidden sm:inline-flex"
           >
             <UserCircle class="size-2.5 mr-0.5" :stroke-width="2" />
             Identity
           </Badge>
-          <div class="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+          <div class="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity sm:opacity-100 sm:group-hover:opacity-100">
             <button
               class="flex h-6 w-6 items-center justify-center rounded text-muted-foreground hover:bg-primary/20 hover:text-primary transition-colors duration-100"
               aria-label="Connect"
@@ -264,21 +267,21 @@ function authLabel(host: Host): string {
               <Plug class="size-3" :stroke-width="1.75" />
             </button>
             <button
-              class="flex h-6 w-6 items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground transition-colors duration-100"
+              class="flex h-6 w-6 items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground transition-colors duration-100 hidden sm:flex"
               aria-label="Edit host"
               @click.stop="editHost(host)"
             >
               <Pencil class="size-3" :stroke-width="1.75" />
             </button>
             <button
-              class="flex h-6 w-6 items-center justify-center rounded text-muted-foreground hover:bg-destructive/20 hover:text-destructive transition-colors duration-100"
+              class="flex h-6 w-6 items-center justify-center rounded text-muted-foreground hover:bg-destructive/20 hover:text-destructive transition-colors duration-100 hidden sm:flex"
               aria-label="Delete host"
               @click.stop="deleteHost(host)"
             >
               <Trash2 class="size-3" :stroke-width="1.75" />
             </button>
           </div>
-          <ChevronRight class="size-3.5 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity" :stroke-width="1.75" />
+          <ChevronRight class="size-3.5 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity hidden sm:block" :stroke-width="1.75" />
         </div>
       </div>
 
@@ -302,13 +305,13 @@ function authLabel(host: Host): string {
       class="flex h-9 items-center gap-2 border-t border-border px-3 bg-muted/30"
     >
       <Server class="size-3.5 text-muted-foreground shrink-0" :stroke-width="1.75" />
-      <span class="text-[12px] text-muted-foreground truncate flex-1">
-        Selected: <span class="text-foreground font-medium">{{ selectedHost.label }}</span>
-        <span class="ml-2 font-mono">{{ selectedHost.username }}@{{ selectedHost.hostname }}:{{ selectedHost.port }}</span>
+      <span class="text-[12px] text-muted-foreground truncate flex-1 min-w-0">
+        <span class="text-foreground font-medium">{{ selectedHost.label }}</span>
+        <span class="ml-2 font-mono hidden sm:inline">{{ selectedHost.username }}@{{ selectedHost.hostname }}:{{ selectedHost.port }}</span>
       </span>
-      <Button size="sm" @click="onHostDblClick(selectedHost)">
+      <Button size="sm" class="shrink-0" @click="onHostDblClick(selectedHost)">
         <Plug class="size-3.5" :stroke-width="1.75" />
-        Connect
+        <span class="hidden sm:inline">Connect</span>
       </Button>
     </div>
 

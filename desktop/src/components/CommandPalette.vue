@@ -108,7 +108,7 @@ function handleKeydown(e: KeyboardEvent) {
       @click="emit('close')"
     >
       <div
-        class="absolute left-1/2 top-[20%] -translate-x-1/2 w-[560px] max-w-[92vw]"
+        class="absolute left-1/2 top-[20%] -translate-x-1/2 w-[560px] max-w-[92vw] px-2 sm:px-0"
         @click.stop
       >
         <div

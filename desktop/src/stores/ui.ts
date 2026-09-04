@@ -9,6 +9,12 @@ export const useUiStore = defineStore("ui", () => {
   // Fullscreen pane
   const fullscreenPaneId = ref<string | null>(null);
 
+  // Sidebar collapsed state (icon-only mode for small screens)
+  const sidebarCollapsed = ref(false);
+
+  // Mobile sidebar overlay (for very small screens)
+  const mobileSidebarOpen = ref(false);
+
   function requestVaultUnlock(): Promise<boolean> {
     return new Promise((resolve) => {
       vaultUnlockResolve = resolve;
@@ -36,12 +42,29 @@ export const useUiStore = defineStore("ui", () => {
     fullscreenPaneId.value = null;
   }
 
+  function toggleSidebar() {
+    sidebarCollapsed.value = !sidebarCollapsed.value;
+  }
+
+  function closeMobileSidebar() {
+    mobileSidebarOpen.value = false;
+  }
+
+  function openMobileSidebar() {
+    mobileSidebarOpen.value = true;
+  }
+
   return {
     showVaultUnlockModal,
     fullscreenPaneId,
+    sidebarCollapsed,
+    mobileSidebarOpen,
     requestVaultUnlock,
     resolveVaultUnlock,
     toggleFullscreen,
     exitFullscreen,
+    toggleSidebar,
+    closeMobileSidebar,
+    openMobileSidebar,
   };
 });

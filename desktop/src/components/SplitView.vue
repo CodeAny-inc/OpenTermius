@@ -55,7 +55,7 @@ function close() {
 
 <template>
   <div v-if="isSplit(node)" class="flex w-full h-full" :class="node.direction === 'horizontal' ? 'flex-row' : 'flex-col'">
-    <div class="flex-1 overflow-hidden min-w-[50px] min-h-[50px]" :style="{ flex: node.ratio }">
+    <div class="flex-1 overflow-hidden min-w-[30px] min-h-[30px]" :style="{ flex: node.ratio }">
       <SplitView :node="node.first" :tab-id="tabId" />
     </div>
     <div
@@ -66,7 +66,7 @@ function close() {
       ]"
       @mousedown="startDrag"
     ></div>
-    <div class="flex-1 overflow-hidden min-w-[50px] min-h-[50px]" :style="{ flex: 1 - node.ratio }">
+    <div class="flex-1 overflow-hidden min-w-[30px] min-h-[30px]" :style="{ flex: 1 - node.ratio }">
       <SplitView :node="node.second" :tab-id="tabId" />
     </div>
   </div>

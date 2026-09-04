@@ -61,9 +61,9 @@ async function remove(entry: KnownHostEntry) {
 <template>
   <div class="flex flex-col h-full overflow-hidden">
     <!-- Header -->
-    <div class="flex h-11 items-center gap-2 border-b border-border px-4">
-      <h2 class="text-[14px] font-semibold">Known Hosts</h2>
-      <div class="ml-auto text-[12px] text-muted-foreground">
+    <div class="flex h-11 items-center gap-2 border-b border-border px-4 pl-12 md:pl-4">
+      <h2 class="text-[14px] font-semibold truncate">Known Hosts</h2>
+      <div class="ml-auto text-[12px] text-muted-foreground shrink-0">
         {{ hosts.length }} host{{ hosts.length === 1 ? '' : 's' }}
       </div>
     </div>

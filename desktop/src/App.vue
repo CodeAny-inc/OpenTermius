@@ -20,6 +20,7 @@ import SettingsView from "./components/SettingsView.vue";
 import CommandPalette from "./components/CommandPalette.vue";
 import UpdateModal from "./components/UpdateModal.vue";
 import VaultUnlockModal from "./components/VaultUnlockModal.vue";
+import { Menu } from "lucide-vue-next";
 
 const vault = useVaultStore();
 const hosts = useHostsStore();
@@ -105,7 +106,14 @@ onUnmounted(() => {
       @open-command-palette="commandPaletteOpen = true"
     />
 
-    <main class="flex-1 flex flex-col overflow-hidden min-w-[480px]">
+    <main class="flex-1 flex flex-col overflow-hidden min-w-0">
+      <!-- Mobile menu button (visible on small screens) -->
+      <button
+        class="flex h-9 w-9 items-center justify-center rounded-md text-muted-foreground hover:bg-muted transition-colors duration-100 md:hidden absolute top-1 left-1 z-30"
+        @click="ui.openMobileSidebar()"
+      >
+        <Menu class="size-4" :stroke-width="1.75" />
+      </button>
       <!-- TerminalArea uses v-show to preserve state across view switches -->
       <TerminalArea v-show="showMainContent" />
       <HostList v-if="activeView === 'hosts'" @switch-view="activeView = $event" />

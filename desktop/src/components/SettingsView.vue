@@ -64,40 +64,40 @@ function openReleases() {
 <template>
   <div class="flex flex-col h-full overflow-hidden">
     <!-- Header -->
-    <div class="flex h-11 items-center gap-2 border-b border-border px-4">
+    <div class="flex h-11 items-center gap-2 border-b border-border px-4 pl-12 md:pl-4">
       <SettingsIcon class="size-4 text-muted-foreground" :stroke-width="1.75" />
       <h2 class="text-[14px] font-semibold">Settings</h2>
     </div>
 
     <!-- Content -->
-    <div class="flex-1 overflow-y-auto p-6">
-      <div class="max-w-[640px] mx-auto flex flex-col gap-6">
+    <div class="flex-1 overflow-y-auto p-4 sm:p-6">
+      <div class="max-w-[640px] mx-auto flex flex-col gap-4 sm:gap-6">
 
         <!-- About section -->
-        <section class="rounded-lg border border-border bg-card p-5">
+        <section class="rounded-lg border border-border bg-card p-4 sm:p-5">
           <h3 class="text-[14px] font-semibold mb-4 flex items-center gap-2">
             <Info class="size-4 text-muted-foreground" :stroke-width="1.75" />
             About
           </h3>
-          <div class="flex items-center gap-4 mb-4">
-            <div class="flex h-14 w-14 items-center justify-center rounded-xl bg-primary/10 shrink-0">
-              <SettingsIcon class="size-7 text-primary" :stroke-width="1.5" />
+          <div class="flex items-center gap-3 sm:gap-4 mb-4">
+            <div class="flex h-12 w-12 sm:h-14 sm:w-14 items-center justify-center rounded-xl bg-primary/10 shrink-0">
+              <SettingsIcon class="size-6 sm:size-7 text-primary" :stroke-width="1.5" />
             </div>
             <div class="flex-1 min-w-0">
-              <div class="text-[16px] font-semibold">{{ appInfo?.name ?? 'OpenTermius' }}</div>
+              <div class="text-[15px] sm:text-[16px] font-semibold truncate">{{ appInfo?.name ?? 'OpenTermius' }}</div>
               <div class="text-[12px] text-muted-foreground mt-0.5">
                 Version <span class="font-mono font-medium text-foreground">v{{ appInfo?.version ?? '—' }}</span>
               </div>
             </div>
-            <Badge>{{ appInfo?.platform ?? '—' }} / {{ appInfo?.arch ?? '—' }}</Badge>
+            <Badge class="hidden sm:inline-flex">{{ appInfo?.platform ?? '—' }} / {{ appInfo?.arch ?? '—' }}</Badge>
           </div>
-          <div class="flex items-center gap-2 pt-3 border-t border-border">
+          <div class="flex flex-wrap items-center gap-2 pt-3 border-t border-border">
             <button
               class="inline-flex h-7 items-center gap-1.5 rounded-md px-2.5 text-[12px] text-muted-foreground hover:bg-muted transition-colors duration-100"
               @click="openGitHub"
             >
               <Github class="size-3.5" :stroke-width="1.75" />
-              GitHub
+              <span class="hidden xs:inline">GitHub</span>
               <ExternalLink class="size-3" :stroke-width="1.75" />
             </button>
             <button
@@ -105,21 +105,21 @@ function openReleases() {
               @click="openReleases"
             >
               <Download class="size-3.5" :stroke-width="1.75" />
-              Releases
+              <span class="hidden xs:inline">Releases</span>
               <ExternalLink class="size-3" :stroke-width="1.75" />
             </button>
           </div>
         </section>
 
         <!-- Updates section -->
-        <section class="rounded-lg border border-border bg-card p-5">
+        <section class="rounded-lg border border-border bg-card p-4 sm:p-5">
           <h3 class="text-[14px] font-semibold mb-4 flex items-center gap-2">
             <ArrowUpCircle class="size-4 text-muted-foreground" :stroke-width="1.75" />
             Updates
           </h3>
 
           <!-- Status row -->
-          <div class="flex items-center gap-3 mb-4">
+          <div class="flex items-start sm:items-center gap-3 mb-4 flex-wrap">
             <!-- Status icon -->
             <div class="flex h-9 w-9 items-center justify-center rounded-md shrink-0"
               :class="{
@@ -196,7 +196,7 @@ function openReleases() {
             </div>
 
             <!-- Install button -->
-            <div v-else class="flex items-center gap-2">
+            <div v-else class="flex flex-wrap items-center gap-2">
               <Button size="sm" @click="update.install()">
                 <Download class="size-3.5 mr-1" :stroke-width="1.75" />
                 Download & Restart

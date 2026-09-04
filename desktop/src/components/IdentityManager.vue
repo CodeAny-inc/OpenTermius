@@ -260,16 +260,19 @@ function hostsUsingIdentity(identityId: string): number {
 <template>
   <div class="flex flex-col h-full overflow-hidden">
     <!-- Header -->
-    <div class="flex h-11 items-center gap-2 border-b border-border px-4">
-      <h2 class="text-[14px] font-semibold">Identities</h2>
-      <div class="ml-auto flex items-center gap-2">
-        <Button size="sm" variant="ghost" @click="showGroupForm = true">
+    <div class="flex h-11 items-center gap-2 border-b border-border px-4 pl-12 md:pl-4">
+      <h2 class="text-[14px] font-semibold truncate">Identities</h2>
+      <div class="ml-auto flex items-center gap-1.5 sm:gap-2 shrink-0">
+        <Button size="sm" variant="ghost" class="hidden sm:inline-flex" @click="showGroupForm = true">
           <FolderPlus class="size-3.5" :stroke-width="1.75" />
-          New Group
+          <span class="hidden sm:inline">New Group</span>
+        </Button>
+        <Button size="sm" variant="ghost" class="sm:hidden" @click="showGroupForm = true">
+          <FolderPlus class="size-3.5" :stroke-width="1.75" />
         </Button>
         <Button size="sm" @click="addIdentity">
           <Plus class="size-3.5" :stroke-width="1.75" />
-          Add Identity
+          <span class="hidden sm:inline">Add Identity</span>
         </Button>
       </div>
     </div>
@@ -333,13 +336,13 @@ function hostsUsingIdentity(identityId: string): number {
         <div
           v-for="id in identities.filteredIdentities"
           :key="id.id"
-          class="group flex items-center gap-3 rounded-md border border-border bg-card p-3 transition-colors duration-100 hover:border-muted-foreground/30"
+          class="group flex items-center gap-2 sm:gap-3 rounded-md border border-border bg-card p-2.5 sm:p-3 transition-colors duration-100 hover:border-muted-foreground/30"
         >
-          <div class="flex h-9 w-9 items-center justify-center rounded-md bg-muted">
+          <div class="flex h-9 w-9 items-center justify-center rounded-md bg-muted shrink-0">
             <UserCircle class="size-4 text-muted-foreground" :stroke-width="1.75" />
           </div>
           <div class="flex-1 min-w-0">
-            <div class="flex items-center gap-2">
+            <div class="flex items-center gap-2 flex-wrap">
               <span class="text-[13px] font-medium truncate">{{ id.label }}</span>
               <Badge>{{ authLabel(id.auth) }}</Badge>
               <Badge v-if="hostsUsingIdentity(id.id) > 0" class="bg-primary/10 text-primary border-primary/20">

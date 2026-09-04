@@ -138,3 +138,21 @@
     border-width: 0.5px;
   }
 }
+
+/* Responsive: prevent horizontal overflow on small screens */
+@media (max-width: 640px) {
+  .xterm .xterm-screen {
+    padding: 2px;
+  }
+}
+
+/* Smooth scrolling for overflow areas */
+.overflow-y-auto {
+  scroll-behavior: smooth;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* Prevent text selection on UI chrome but allow in inputs */
+input, textarea, select, [contenteditable] {
+  user-select: text;
+}

@@ -275,26 +275,26 @@ const colorOptions = [
 <template>
   <div class="flex flex-col h-full overflow-hidden">
     <!-- Header -->
-    <div class="flex h-11 items-center gap-2 border-b border-border px-4">
-      <h2 class="text-[14px] font-semibold">Workspaces</h2>
-      <div class="ml-auto">
+    <div class="flex h-11 items-center gap-2 border-b border-border px-4 pl-12 md:pl-4">
+      <h2 class="text-[14px] font-semibold truncate">Workspaces</h2>
+      <div class="ml-auto shrink-0">
         <Button size="sm" @click="addWorkspace">
           <Plus class="size-3.5" :stroke-width="1.75" />
-          New Workspace
+          <span class="hidden sm:inline">New Workspace</span>
         </Button>
       </div>
     </div>
 
     <!-- Content -->
-    <div class="flex-1 overflow-y-auto p-4">
-      <div v-if="workspaces.workspaces.length" class="flex flex-col gap-3 max-w-[800px]">
+    <div class="flex-1 overflow-y-auto p-3 sm:p-4">
+      <div v-if="workspaces.workspaces.length" class="flex flex-col gap-3 max-w-[800px] mx-auto">
         <div
           v-for="ws in workspaces.workspaces"
           :key="ws.id"
           class="group rounded-lg border border-border bg-card overflow-hidden transition-colors duration-100 hover:border-muted-foreground/30"
         >
           <!-- Workspace header -->
-          <div class="flex items-center gap-3 p-4">
+          <div class="flex items-center gap-3 p-3 sm:p-4">
             <!-- Color dot -->
             <div
               v-if="ws.color"
@@ -305,7 +305,7 @@ const colorOptions = [
               <FolderOpen class="size-5 text-muted-foreground" :stroke-width="1.75" />
             </div>
             <div class="flex-1 min-w-0">
-              <div class="flex items-center gap-2">
+              <div class="flex items-center gap-2 flex-wrap">
                 <span class="text-[14px] font-semibold truncate">{{ ws.name }}</span>
                 <Badge v-if="ws.auto_connect" class="bg-primary/10 text-primary border-primary/20">
                   <Zap class="size-2.5 mr-0.5" :stroke-width="2" />
@@ -315,7 +315,7 @@ const colorOptions = [
               <div v-if="ws.description" class="text-[12px] text-muted-foreground truncate mt-0.5">
                 {{ ws.description }}
               </div>
-              <div class="text-[11px] text-muted-foreground mt-0.5 flex items-center gap-3">
+              <div class="text-[11px] text-muted-foreground mt-0.5 flex items-center gap-2 sm:gap-3 flex-wrap">
                 <span class="flex items-center gap-1">
                   <LayoutGrid class="size-3" :stroke-width="1.75" />
                   {{ ws.tabs?.length || 0 }} tab{{ (ws.tabs?.length || 0) === 1 ? '' : 's' }}
@@ -328,9 +328,9 @@ const colorOptions = [
               </div>
             </div>
             <!-- Quick actions -->
-            <div class="flex items-center gap-1">
+            <div class="flex items-center gap-0.5 sm:gap-1 shrink-0">
               <button
-                class="flex h-7 items-center gap-1 rounded px-2 text-[11px] text-muted-foreground hover:bg-accent hover:text-foreground transition-colors duration-100"
+                class="hidden sm:flex h-7 items-center gap-1 rounded px-2 text-[11px] text-muted-foreground hover:bg-accent hover:text-foreground transition-colors duration-100"
                 aria-label="Save current layout"
                 title="Save current tab layout into this workspace"
                 @click="saveCurrentLayout(ws)"
@@ -345,7 +345,7 @@ const colorOptions = [
                 @click="restoreWorkspace(ws)"
               >
                 <Play class="size-3" :stroke-width="1.75" />
-                Open
+                <span class="hidden sm:inline">Open</span>
               </button>
               <button
                 class="flex h-7 w-7 items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground transition-colors duration-100"

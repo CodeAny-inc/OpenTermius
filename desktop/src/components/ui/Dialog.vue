@@ -24,16 +24,17 @@ const emit = defineEmits<{ close: [] }>();
       <div
         :class="cn(
           'fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2',
-          'z-50 w-full max-w-[92vw]',
+          'z-50 w-full max-w-[92vw] max-h-[90vh]',
           'rounded-xl border border-border bg-popover text-popover-foreground shadow-dialog',
           'animate-scale-in',
           'flex flex-col',
+          'mx-2',
           props.class,
         )"
         :style="{ maxWidth: props.width }"
         @click.stop
       >
-        <div v-if="props.title || $slots.header" class="px-5 pt-5 pb-3">
+        <div v-if="props.title || $slots.header" class="px-4 sm:px-5 pt-4 sm:pt-5 pb-3">
           <slot name="header">
             <h2 class="text-[15px] font-semibold leading-tight">{{ props.title }}</h2>
             <p v-if="props.description" class="mt-1 text-[13px] text-muted-foreground">
@@ -41,12 +42,12 @@ const emit = defineEmits<{ close: [] }>();
             </p>
           </slot>
         </div>
-        <div class="px-5 py-3 overflow-y-auto flex-1">
+        <div class="px-4 sm:px-5 py-3 overflow-y-auto flex-1">
           <slot />
         </div>
         <div
           v-if="$slots.footer"
-          class="flex items-center justify-end gap-2 border-t border-border px-5 py-3"
+          class="flex flex-wrap items-center justify-end gap-2 border-t border-border px-4 sm:px-5 py-3"
         >
           <slot name="footer" />
         </div>

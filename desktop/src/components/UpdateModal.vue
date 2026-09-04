@@ -44,7 +44,7 @@ function openReleases() {
         class="fixed inset-0 z-[110] flex items-center justify-center bg-black/50"
         @click.self="update.dismissForNow()"
       >
-        <div class="w-[440px] rounded-xl border border-border bg-card shadow-dialog overflow-hidden">
+        <div class="w-[440px] max-w-[92vw] rounded-xl border border-border bg-card shadow-dialog overflow-hidden">
           <!-- Header with gradient -->
           <div class="relative bg-gradient-to-br from-primary/15 via-primary/5 to-transparent px-5 pt-5 pb-4">
             <button
@@ -129,17 +129,17 @@ function openReleases() {
           </div>
 
           <!-- Footer -->
-          <div class="flex items-center gap-2 px-5 py-3.5 border-t border-border bg-muted/20">
+          <div class="flex flex-wrap items-center gap-2 px-4 sm:px-5 py-3.5 border-t border-border bg-muted/20">
             <button
               class="inline-flex h-8 items-center gap-1.5 rounded-md px-2.5 text-[12px] text-muted-foreground hover:bg-muted transition-colors duration-100"
               @click="openReleases"
             >
               <ExternalLink class="size-3" :stroke-width="1.75" />
-              Release Notes
+              <span class="hidden sm:inline">Release Notes</span>
             </button>
             <div class="flex-1"></div>
             <template v-if="!update.installing">
-              <Button variant="ghost" size="sm" @click="update.skipVersion()">
+              <Button variant="ghost" size="sm" class="hidden sm:inline-flex" @click="update.skipVersion()">
                 Skip this version
               </Button>
               <Button variant="ghost" size="sm" @click="update.dismissForNow()">
