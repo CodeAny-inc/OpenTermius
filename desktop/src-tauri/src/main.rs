@@ -79,6 +79,8 @@ fn main() {
             commands::session_resize,
             commands::close_session,
             commands::list_sessions,
+            // file I/O
+            commands::read_key_file,
             // updater
             commands::check_for_updates,
             commands::install_update,

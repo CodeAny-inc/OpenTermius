@@ -141,7 +141,7 @@ export const useTabsStore = defineStore("tabs", () => {
   function setPaneConnected(paneIdStr: string, sessionId: string) {
     const tab = activeTab.value;
     if (!tab) return;
-    updatePaneInTree(tab.tree, paneIdStr, (p) => ({
+    tab.tree = updatePaneInTree(tab.tree, paneIdStr, (p) => ({
       ...p,
       sessionId,
       connected: true,
@@ -151,13 +151,13 @@ export const useTabsStore = defineStore("tabs", () => {
   function setPaneTitle(paneIdStr: string, title: string) {
     const tab = activeTab.value;
     if (!tab) return;
-    updatePaneInTree(tab.tree, paneIdStr, (p) => ({ ...p, title }));
+    tab.tree = updatePaneInTree(tab.tree, paneIdStr, (p) => ({ ...p, title }));
   }
 
   function setRatio(splitId: string, ratio: number) {
     const tab = activeTab.value;
     if (!tab) return;
-    updateSplitInTree(tab.tree, splitId, ratio);
+    tab.tree = updateSplitInTree(tab.tree, splitId, ratio);
   }
 
   // Find the first pane in a tree (for focusing)

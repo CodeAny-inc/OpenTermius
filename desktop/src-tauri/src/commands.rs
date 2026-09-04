@@ -369,7 +369,7 @@ pub async fn create_local_terminal(
     let mut cmd = CommandBuilder::new(&shell);
     cmd.env("TERM", "xterm-256color");
 
-    let _child = pair
+    let child = pair
         .slave
         .spawn_command(cmd)
         .map_err(|e| format!("spawn: {e}"))?;
@@ -386,12 +386,16 @@ pub async fn create_local_terminal(
 
     let master = pair.master;
 
+    // Drop the slave so the child process owns the only slave fd.
+    // On Unix this is the correct pattern — the child has its own copy.
+    drop(pair.slave);
+
     // Spawn a reading thread that emits data events
     let app_handle = app.clone();
     let sid = session_id.clone();
     std::thread::spawn(move || {
         use std::io::Read;
-        let mut buf = [0u8; 4096];
+        let mut buf = [0u8; 8192];
         loop {
             match reader.read(&mut buf) {
                 Ok(0) => break,
@@ -403,6 +407,10 @@ pub async fn create_local_terminal(
                             data: buf[..n].to_vec(),
                         },
                     );
+                }
+                Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                    std::thread::sleep(std::time::Duration::from_millis(10));
+                    continue;
                 }
                 Err(_) => break,
             }
@@ -416,9 +424,17 @@ pub async fn create_local_terminal(
         );
     });
 
-    // Store the master for writing and resizing
+    // Store the master and child for writing, resizing, and keeping
+    // the child process alive.
     let mut locals = state.local_terminals.lock().await;
-    locals.insert(session_id, LocalTerminal { writer, master });
+    locals.insert(
+        session_id,
+        LocalTerminal {
+            writer,
+            master,
+            _child: child,
+        },
+    );
 
     Ok(())
 }
@@ -493,6 +509,28 @@ pub async fn list_sessions(state: State<'_, Arc<AppState>>) -> ApiResult<Vec<Str
     let locals = state.local_terminals.lock().await;
     sessions.extend(locals.keys().cloned());
     Ok(sessions)
+}
+
+// ============================================================
+// File I/O
+// ============================================================
+
+/// Read a private key file from the filesystem. Used by the key import
+/// dialog when the user browses for a file instead of pasting.
+#[tauri::command]
+pub async fn read_key_file(path: String) -> ApiResult<String> {
+    // Validate the path looks like a key file (basic sanity check)
+    let path = std::path::Path::new(&path);
+    if !path.is_file() {
+        return Err(format!("Not a file: {}", path.display()));
+    }
+    // Limit file size to 256KB to prevent reading huge files
+    let metadata = std::fs::metadata(path).map_err(err)?;
+    if metadata.len() > 256 * 1024 {
+        return Err("File too large (max 256KB)".to_string());
+    }
+    let content = std::fs::read_to_string(path).map_err(err)?;
+    Ok(content)
 }
 
 // ============================================================

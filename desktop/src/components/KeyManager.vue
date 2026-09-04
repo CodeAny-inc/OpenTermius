@@ -16,7 +16,11 @@ import {
   Check,
   Eye,
   EyeOff,
+  FolderOpen,
+  Loader2,
 } from "lucide-vue-next";
+import * as api from "../api";
+import { open } from "@tauri-apps/plugin-dialog";
 import type { KeyMeta } from "../types";
 
 const keys = useKeysStore();
@@ -24,6 +28,7 @@ const keys = useKeysStore();
 const showAdd = ref(false);
 const showPublic = ref<string | null>(null);
 const copiedId = ref<string | null>(null);
+const importing = ref(false);
 
 const addForm = ref({
   label: "",
@@ -70,6 +75,28 @@ async function copyPublicKey(key: KeyMeta) {
     setTimeout(() => (copiedId.value = null), 1500);
   } catch (e) {
     console.error(e);
+  }
+}
+
+async function browseForKeyFile() {
+  importing.value = true;
+  try {
+    const selected = await open({
+      multiple: false,
+      directory: false,
+      filters: [
+        { name: "SSH Private Keys", extensions: ["pem", "key", "id_rsa", "id_ed25519", "id_ecdsa", "id_dsa"] },
+        { name: "All Files", extensions: ["*"] },
+      ],
+    });
+    if (typeof selected === "string" && selected) {
+      const content = await api.readKeyFile(selected);
+      addForm.value.privateKey = content;
+    }
+  } catch (e) {
+    console.error("Failed to read key file:", e);
+  } finally {
+    importing.value = false;
   }
 }
 </script>
@@ -191,12 +218,23 @@ async function copyPublicKey(key: KeyMeta) {
 
         <template v-if="addForm.import">
           <FormGroup>
-            <Label for="key-private">Private key (OpenSSH)</Label>
+            <div class="flex items-center justify-between">
+              <Label for="key-private">Private key (OpenSSH)</Label>
+              <button
+                class="inline-flex h-6 items-center gap-1 rounded text-[11px] text-muted-foreground hover:text-foreground transition-colors duration-100"
+                :disabled="importing"
+                @click="browseForKeyFile"
+              >
+                <Loader2 v-if="importing" class="size-3 animate-spin" :stroke-width="1.75" />
+                <FolderOpen v-else class="size-3" :stroke-width="1.75" />
+                Browse...
+              </button>
+            </div>
             <Textarea
               id="key-private"
               v-model="addForm.privateKey"
               :rows="6"
-              placeholder="-----BEGIN OPENSSH PRIVATE KEY-----..."
+              placeholder="-----BEGIN OPENSSH PRIVATE KEY-----... or click Browse to select a file"
               class="font-mono text-[11px]"
             />
           </FormGroup>

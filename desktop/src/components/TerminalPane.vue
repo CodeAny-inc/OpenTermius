@@ -35,6 +35,8 @@ let fitAddon: FitAddon | null = null;
 let unlistenData: UnlistenFn | null = null;
 let unlistenClosed: UnlistenFn | null = null;
 let resizeObserver: ResizeObserver | null = null;
+// Local session ID — set before terminal creation, used in all callbacks
+let currentSessionId: string | null = null;
 
 onMounted(async () => {
   if (!containerRef.value) return;
@@ -57,33 +59,47 @@ onMounted(async () => {
   term.open(containerRef.value);
   fitAddon.fit();
 
-  await connectSession();
+  // Generate session ID BEFORE setting up listeners
+  currentSessionId = crypto.randomUUID();
+  const sessionId = currentSessionId;
 
-  term.onData((data) => {
-    if (props.pane.sessionId) {
-      const bytes = Array.from(new TextEncoder().encode(data));
-      api.sessionWrite(props.pane.sessionId, bytes);
-    }
-  });
-
+  // Set up event listeners BEFORE creating the terminal on the backend.
+  // The backend starts emitting data immediately after creation, so if
+  // we set up listeners after, we lose the initial output (shell prompt).
   unlistenData = await api.onSessionData((event) => {
-    if (event.session_id === props.pane.sessionId && term) {
+    if (event.session_id === sessionId && term) {
       const data = new Uint8Array(event.data);
       term.write(data);
     }
   });
 
   unlistenClosed = await api.onSessionClosed((event) => {
-    if (event.session_id === props.pane.sessionId && term) {
+    if (event.session_id === sessionId && term) {
       term.write(`\r\n\x1b[31m[session closed: ${event.reason}]\x1b[0m\r\n`);
     }
   });
 
+  // Register onData callback using local sessionId
+  term.onData((data) => {
+    if (sessionId) {
+      const bytes = Array.from(new TextEncoder().encode(data));
+      api.sessionWrite(sessionId, bytes);
+    }
+  });
+
+  // Now create the terminal on the backend
+  await connectSession(sessionId);
+
+  // Set up resize observer
   resizeObserver = new ResizeObserver(() => {
     if (fitAddon && term) {
-      fitAddon.fit();
-      if (props.pane.sessionId) {
-        api.sessionResize(props.pane.sessionId, term.cols, term.rows);
+      try {
+        fitAddon.fit();
+        if (sessionId) {
+          api.sessionResize(sessionId, term.cols, term.rows);
+        }
+      } catch (e) {
+        // Ignore resize errors during teardown
       }
     }
   });
@@ -95,19 +111,28 @@ onUnmounted(() => {
   if (unlistenClosed) unlistenClosed();
   if (resizeObserver) resizeObserver.disconnect();
   if (term) term.dispose();
+  // Close the session on the backend
+  if (currentSessionId) {
+    api.closeSession(currentSessionId).catch(() => {});
+  }
 });
 
-async function connectSession() {
+async function connectSession(sessionId: string) {
   if (!term || !fitAddon) return;
-  const sessionId = crypto.randomUUID();
 
   if (props.pane.terminalType === "local") {
-    await api.createLocalTerminal(sessionId, term.cols, term.rows);
-    tabs.setPaneConnected(props.pane.id, sessionId);
+    try {
+      await api.createLocalTerminal(sessionId, term.cols, term.rows);
+      tabs.setPaneConnected(props.pane.id, sessionId);
+    } catch (e) {
+      if (term) {
+        term.write(`\x1b[31mFailed to create local terminal: ${e}\x1b[0m\r\n`);
+      }
+    }
   } else if (props.pane.hostId) {
     const host = hosts.hosts.find((h) => h.id === props.pane.hostId);
     if (!host) {
-      term.write("Host not found\r\n");
+      term?.write("Host not found\r\n");
       return;
     }
     try {
@@ -115,7 +140,7 @@ async function connectSession() {
       await api.connectSsh(sessionId, host, password, term.cols, term.rows);
       tabs.setPaneConnected(props.pane.id, sessionId);
     } catch (e) {
-      term.write(`\x1b[31mConnection failed: ${e}\x1b[0m\r\n`);
+      term?.write(`\x1b[31mConnection failed: ${e}\x1b[0m\r\n`);
     }
   }
 }

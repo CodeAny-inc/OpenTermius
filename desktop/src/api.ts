@@ -65,6 +65,10 @@ export const deleteWorkspace = (id: string) =>
 export const setActiveWorkspace = (id: string) =>
   invoke<void>("set_active_workspace", { id });
 
+// --- file I/O ---
+export const readKeyFile = (path: string) =>
+  invoke<string>("read_key_file", { path });
+
 // --- sessions ---
 export const connectSsh = (
   sessionId: string,

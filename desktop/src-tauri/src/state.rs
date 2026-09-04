@@ -24,6 +24,7 @@ pub struct AppState {
 pub struct LocalTerminal {
     pub writer: Box<dyn std::io::Write + Send>,
     pub master: Box<dyn portable_pty::MasterPty + Send>,
+    pub _child: Box<dyn portable_pty::Child + Send + Sync>,
 }
 
 impl AppState {
