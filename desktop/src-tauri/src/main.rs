@@ -57,7 +57,7 @@ fn main() {
             commands::update_identity,
             commands::delete_identity,
             commands::vault_is_initialized,
-            commands::initialize_vault,
+            vault_commands::initialize_vault,
             vault_commands::secure_unlock_vault,
             commands::lock_vault,
             commands::is_vault_unlocked,

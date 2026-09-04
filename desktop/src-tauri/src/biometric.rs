@@ -220,6 +220,13 @@ use macos as platform;
 #[cfg(not(all(target_os = "macos", feature = "macos-biometric")))]
 use stub as platform;
 
+/// Internal lifecycle hook used before a brand-new vault is created. Keeping
+/// this at the backend boundary prevents callers from bypassing stale-Keychain
+/// cleanup by invoking the vault initialization command directly.
+pub(crate) fn clear_for_vault_initialization() -> ApiResult<()> {
+    platform::clear_passphrase()
+}
+
 // ============================================================
 // Tauri commands
 // ============================================================
@@ -283,5 +290,5 @@ pub async fn unlock_with_biometric(state: State<'_, Arc<AppState>>) -> ApiResult
 /// unsupported builds have no biometric credential and therefore succeed.
 #[tauri::command]
 pub async fn clear_biometric_passphrase() -> ApiResult<()> {
-    platform::clear_passphrase()
+    clear_for_vault_initialization()
 }
