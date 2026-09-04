@@ -5,7 +5,9 @@ use tauri::State;
 type ApiResult<T> = std::result::Result<T, String>;
 
 /// Keychain service and account identifiers for the stored vault passphrase.
+#[cfg(target_os = "macos")]
 const SERVICE: &str = "com.opentermius.vault";
+#[cfg(target_os = "macos")]
 const ACCOUNT: &str = "master-passphrase";
 
 // ============================================================
