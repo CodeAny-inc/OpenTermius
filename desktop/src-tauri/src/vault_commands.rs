@@ -72,7 +72,7 @@ pub async fn secure_unlock_vault(
 /// operation. The generation is advanced before waiting for the passphrase
 /// mutex, ensuring a pending Touch ID request cannot commit after this lock.
 #[tauri::command]
-pub async fn lock_vault(state: State<'_, Arc<AppState>>) -> ApiResult<()> {
+pub async fn secure_lock_vault(state: State<'_, Arc<AppState>>) -> ApiResult<()> {
     state.auth_generation.invalidate();
     let mut pw = state.passphrase.lock().await;
     *pw = None;
