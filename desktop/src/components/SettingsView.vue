@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, computed } from "vue";
+import { ref, onMounted, computed } from "vue";
 import * as api from "../api";
+import { useUpdateStore } from "../stores/update";
 import Button from "./ui/Button.vue";
 import Badge from "./ui/Badge.vue";
 import {
@@ -15,104 +16,35 @@ import {
   ExternalLink,
   Info,
 } from "lucide-vue-next";
-import type { UnlistenFn } from "@tauri-apps/api/event";
 
+const update = useUpdateStore();
 const appInfo = ref<api.AppInfo | null>(null);
-const updateInfo = ref<api.UpdateInfo | null>(null);
-const checking = ref(false);
-const installing = ref(false);
-const extracting = ref(false);
-const progress = ref(0);
-const error = ref("");
-const lastChecked = ref<Date | null>(null);
 
-let unlistenProgress: UnlistenFn | null = null;
-let unlistenExtracting: UnlistenFn | null = null;
-
-const updateAvailable = computed(
-  () => updateInfo.value?.available === true,
-);
+const updateAvailable = computed(() => update.available);
 
 const statusText = computed(() => {
-  if (installing.value) return "Installing...";
-  if (extracting.value) return "Extracting...";
-  if (checking.value) return "Checking for updates...";
-  if (error.value) return "Update check failed";
+  if (update.installing) return "Installing...";
+  if (update.extracting) return "Extracting...";
+  if (update.checking) return "Checking for updates...";
+  if (update.error) return "Update check failed";
   if (updateAvailable.value) return "Update available";
-  if (updateInfo.value && !updateInfo.value.available) return "Up to date";
+  if (update.info && !update.info.available) return "Up to date";
   return "Not checked yet";
 });
 
 onMounted(async () => {
-  // Load app info immediately
   try {
     appInfo.value = await api.getAppInfo();
   } catch (e) {
     console.error("Failed to get app info:", e);
   }
-
-  // Register progress listeners
-  try {
-    unlistenProgress = await api.onUpdateProgress((e) => {
-      if (e.content_length && e.content_length > 0) {
-        progress.value = Math.min(100, (e.chunk_length / e.content_length) * 100);
-      }
-    });
-  } catch (e) {
-    console.error("listen progress failed:", e);
+  // Refresh update status if not recently checked
+  if (!update.lastChecked) {
+    await update.check();
   }
-
-  try {
-    unlistenExtracting = await api.onUpdateExtracting(() => {
-      extracting.value = true;
-    });
-  } catch (e) {
-    console.error("listen extracting failed:", e);
-  }
-
-  // Auto-check on mount
-  await checkForUpdates();
 });
-
-onUnmounted(() => {
-  unlistenProgress?.();
-  unlistenExtracting?.();
-});
-
-async function checkForUpdates() {
-  if (checking.value) return;
-  checking.value = true;
-  error.value = "";
-  try {
-    const info = await api.checkForUpdates();
-    updateInfo.value = info;
-    lastChecked.value = new Date();
-  } catch (e) {
-    error.value = String(e);
-    console.error("Update check failed:", e);
-  } finally {
-    checking.value = false;
-  }
-}
-
-async function downloadAndInstall() {
-  if (installing.value) return;
-  installing.value = true;
-  progress.value = 0;
-  extracting.value = false;
-  error.value = "";
-  try {
-    await api.installUpdate();
-    // App will restart — this code may not execute
-  } catch (e) {
-    error.value = String(e);
-    console.error("Update install failed:", e);
-    installing.value = false;
-  }
-}
 
 function openGitHub() {
-  // Use the shell plugin to open the URL in the default browser
   import("@tauri-apps/plugin-shell").then(({ open }) => {
     open("https://github.com/CodeAny-inc/OpenTermius");
   }).catch(() => {
@@ -191,16 +123,16 @@ function openReleases() {
             <!-- Status icon -->
             <div class="flex h-9 w-9 items-center justify-center rounded-md shrink-0"
               :class="{
-                'bg-green-500/10': updateInfo && !updateInfo.available && !error,
+                'bg-green-500/10': update.info && !update.info.available && !update.error,
                 'bg-primary/10': updateAvailable,
-                'bg-destructive/10': error,
-                'bg-muted': checking || (!updateInfo && !error),
+                'bg-destructive/10': update.error,
+                'bg-muted': update.checking || (!update.info && !update.error),
               }"
             >
-              <CheckCircle2 v-if="updateInfo && !updateInfo.available && !error" class="size-5 text-green-500" :stroke-width="1.75" />
+              <CheckCircle2 v-if="update.info && !update.info.available && !update.error" class="size-5 text-green-500" :stroke-width="1.75" />
               <ArrowUpCircle v-else-if="updateAvailable" class="size-5 text-primary" :stroke-width="1.75" />
-              <AlertCircle v-else-if="error" class="size-5 text-destructive" :stroke-width="1.75" />
-              <Loader2 v-else-if="checking" class="size-5 text-muted-foreground animate-spin" :stroke-width="1.75" />
+              <AlertCircle v-else-if="update.error" class="size-5 text-destructive" :stroke-width="1.75" />
+              <Loader2 v-else-if="update.checking" class="size-5 text-muted-foreground animate-spin" :stroke-width="1.75" />
               <Info v-else class="size-5 text-muted-foreground" :stroke-width="1.75" />
             </div>
 
@@ -208,20 +140,20 @@ function openReleases() {
               <div class="text-[13px] font-medium">{{ statusText }}</div>
               <div class="text-[11px] text-muted-foreground mt-0.5">
                 <template v-if="updateAvailable">
-                  v{{ updateInfo?.version }} is available (current: v{{ updateInfo?.current_version }})
+                  v{{ update.version }} is available (current: v{{ update.currentVersion }})
                 </template>
-                <template v-else-if="updateInfo && !updateInfo.available">
+                <template v-else-if="update.info && !update.info.available">
                   You're on the latest version
                 </template>
-                <template v-else-if="error">
-                  {{ error }}
+                <template v-else-if="update.error">
+                  {{ update.error }}
                 </template>
                 <template v-else>
                   Click "Check Now" to check for updates
                 </template>
               </div>
-              <div v-if="lastChecked" class="text-[10px] text-muted-foreground mt-0.5">
-                Last checked: {{ lastChecked.toLocaleTimeString() }}
+              <div v-if="update.lastChecked" class="text-[10px] text-muted-foreground mt-0.5">
+                Last checked: {{ update.lastChecked.toLocaleTimeString() }}
               </div>
             </div>
 
@@ -229,10 +161,10 @@ function openReleases() {
             <Button
               size="sm"
               variant="outline"
-              :disabled="checking || installing"
-              @click="checkForUpdates"
+              :disabled="update.checking || update.installing"
+              @click="update.check()"
             >
-              <RefreshCw class="size-3.5 mr-1" :class="{ 'animate-spin': checking }" :stroke-width="1.75" />
+              <RefreshCw class="size-3.5 mr-1" :class="{ 'animate-spin': update.checking }" :stroke-width="1.75" />
               Check Now
             </Button>
           </div>
@@ -240,44 +172,45 @@ function openReleases() {
           <!-- Update details + install -->
           <div v-if="updateAvailable" class="border-t border-border pt-4">
             <!-- Release notes -->
-            <div v-if="updateInfo?.body" class="mb-4">
+            <div v-if="update.body" class="mb-4">
               <div class="text-[11px] font-medium text-muted-foreground uppercase tracking-wide mb-1.5">
                 Release Notes
               </div>
               <div class="text-[12px] text-muted-foreground whitespace-pre-wrap rounded-md bg-muted/50 p-3 max-h-[200px] overflow-y-auto">
-                {{ updateInfo.body }}
+                {{ update.body }}
               </div>
             </div>
 
             <!-- Download progress -->
-            <div v-if="installing" class="mb-4">
+            <div v-if="update.installing" class="mb-4">
               <div class="h-1.5 w-full rounded-full bg-muted overflow-hidden">
                 <div
                   class="h-full bg-primary transition-all duration-140 ease-grok"
-                  :style="{ width: extracting ? '100%' : `${progress}%` }"
+                  :style="{ width: update.extracting ? '100%' : `${update.progress}%` }"
                 />
               </div>
               <div class="text-[11px] text-muted-foreground mt-1.5 flex items-center gap-1.5">
                 <Loader2 class="size-3 animate-spin" :stroke-width="1.75" />
-                {{ extracting ? "Extracting and installing..." : `Downloading... ${Math.round(progress)}%` }}
+                {{ update.extracting ? "Extracting and installing..." : `Downloading... ${Math.round(update.progress)}%` }}
               </div>
             </div>
 
             <!-- Install button -->
             <div v-else class="flex items-center gap-2">
-              <Button size="sm" @click="downloadAndInstall">
+              <Button size="sm" @click="update.install()">
                 <Download class="size-3.5 mr-1" :stroke-width="1.75" />
                 Download & Restart
               </Button>
-              <span class="text-[11px] text-muted-foreground">
-                The app will restart automatically after installation
-              </span>
+              <Button size="sm" variant="outline" @click="update.showUpdateDialog()">
+                <ArrowUpCircle class="size-3.5 mr-1" :stroke-width="1.75" />
+                Show Update Dialog
+              </Button>
             </div>
           </div>
 
           <!-- Error retry -->
-          <div v-if="error && !installing" class="border-t border-border pt-4">
-            <Button size="sm" variant="outline" @click="checkForUpdates">
+          <div v-if="update.error && !update.installing" class="border-t border-border pt-4">
+            <Button size="sm" variant="outline" @click="update.check()">
               <RefreshCw class="size-3.5 mr-1" :stroke-width="1.75" />
               Try Again
             </Button>

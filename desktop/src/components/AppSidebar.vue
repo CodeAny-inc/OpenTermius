@@ -11,8 +11,10 @@ import {
   Settings,
   CircleDot,
   UserCircle,
+  ArrowUpCircle,
 } from "lucide-vue-next";
 import { cn } from "../lib/cn";
+import { useUpdateStore } from "../stores/update";
 
 defineProps<{
   activeView: string;
@@ -24,6 +26,8 @@ const emit = defineEmits<{
   navigate: [string];
   "open-command-palette": [];
 }>();
+
+const update = useUpdateStore();
 
 const navItems = [
   { id: "hosts", label: "Hosts", icon: Server },
@@ -121,6 +125,13 @@ const navItems = [
       >
         <Settings class="size-3.5 text-muted-foreground" :stroke-width="1.75" />
         <span class="flex-1 text-left">Settings</span>
+        <span
+          v-if="update.available"
+          class="flex h-4 items-center gap-0.5 rounded-full bg-primary px-1.5 text-[10px] font-medium text-primary-foreground"
+        >
+          <ArrowUpCircle class="size-2.5" :stroke-width="2" />
+          {{ update.version }}
+        </span>
       </button>
     </div>
   </aside>

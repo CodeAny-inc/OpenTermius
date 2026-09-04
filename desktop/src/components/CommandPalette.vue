@@ -11,9 +11,12 @@ import {
   Plus,
   UserCircle,
   Settings,
+  RefreshCw,
+  ArrowUpCircle,
 } from "lucide-vue-next";
 import { cn } from "../lib/cn";
 import { useTabsStore } from "../stores/tabs";
+import { useUpdateStore } from "../stores/update";
 
 const props = defineProps<{ open: boolean }>();
 const emit = defineEmits<{
@@ -22,26 +25,39 @@ const emit = defineEmits<{
 }>();
 
 const tabs = useTabsStore();
+const update = useUpdateStore();
 const query = ref("");
 const selectedIndex = ref(0);
 const inputRef = ref<HTMLInputElement | null>(null);
 
-const baseCommands = [
-  { id: "hosts", label: "Go to Hosts", icon: Server, group: "Navigation" },
-  { id: "identities", label: "Go to Identities", icon: UserCircle, group: "Navigation" },
-  { id: "terminal", label: "Go to Terminal", icon: Terminal, group: "Navigation" },
-  { id: "keys", label: "Go to Keys", icon: KeyRound, group: "Navigation" },
-  { id: "workspaces", label: "Go to Workspaces", icon: FolderOpen, group: "Navigation" },
-  { id: "known-hosts", label: "Go to Known Hosts", icon: ShieldCheck, group: "Navigation" },
-  { id: "vault", label: "Go to Vault Settings", icon: Vault, group: "Navigation" },
-  { id: "settings", label: "Go to Settings", icon: Settings, group: "Navigation" },
-  { id: "new-terminal", label: "New Terminal Tab", icon: Plus, group: "Actions" },
-];
+const baseCommands = computed(() => {
+  const cmds = [
+    { id: "hosts", label: "Go to Hosts", icon: Server, group: "Navigation" },
+    { id: "identities", label: "Go to Identities", icon: UserCircle, group: "Navigation" },
+    { id: "terminal", label: "Go to Terminal", icon: Terminal, group: "Navigation" },
+    { id: "keys", label: "Go to Keys", icon: KeyRound, group: "Navigation" },
+    { id: "workspaces", label: "Go to Workspaces", icon: FolderOpen, group: "Navigation" },
+    { id: "known-hosts", label: "Go to Known Hosts", icon: ShieldCheck, group: "Navigation" },
+    { id: "vault", label: "Go to Vault Settings", icon: Vault, group: "Navigation" },
+    { id: "settings", label: "Go to Settings", icon: Settings, group: "Navigation" },
+    { id: "new-terminal", label: "New Terminal Tab", icon: Plus, group: "Actions" },
+    { id: "check-updates", label: "Check for Updates", icon: RefreshCw, group: "Actions" },
+  ];
+  if (update.available) {
+    cmds.push({
+      id: "show-update",
+      label: `Update to v${update.version}`,
+      icon: ArrowUpCircle,
+      group: "Actions",
+    });
+  }
+  return cmds;
+});
 
 const filteredCommands = computed(() => {
-  if (!query.value.trim()) return baseCommands;
+  if (!query.value.trim()) return baseCommands.value;
   const q = query.value.toLowerCase();
-  return baseCommands.filter((c) => c.label.toLowerCase().includes(q));
+  return baseCommands.value.filter((c) => c.label.toLowerCase().includes(q));
 });
 
 watch(
@@ -55,10 +71,15 @@ watch(
   },
 );
 
-function execute(cmd: (typeof baseCommands)[0]) {
+function execute(cmd: { id: string }) {
   if (cmd.id === "new-terminal") {
     tabs.newTab();
     emit("navigate", "terminal");
+  } else if (cmd.id === "check-updates") {
+    update.check();
+    emit("navigate", "settings");
+  } else if (cmd.id === "show-update") {
+    update.showUpdateDialog();
   } else {
     emit("navigate", cmd.id);
   }

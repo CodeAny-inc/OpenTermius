@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, computed } from "vue";
+import { ref, onMounted, onUnmounted, computed, watch } from "vue";
 import { useVaultStore } from "./stores/vault";
 import { useHostsStore } from "./stores/hosts";
 import { useKeysStore } from "./stores/keys";
@@ -7,6 +7,7 @@ import { useIdentitiesStore } from "./stores/identities";
 import { useWorkspacesStore } from "./stores/workspaces";
 import { useTabsStore } from "./stores/tabs";
 import { useUiStore } from "./stores/ui";
+import { useUpdateStore } from "./stores/update";
 import AppSidebar from "./components/AppSidebar.vue";
 import TerminalArea from "./components/TerminalArea.vue";
 import HostList from "./components/HostList.vue";
@@ -17,7 +18,7 @@ import KnownHostsView from "./components/KnownHostsView.vue";
 import WorkspaceView from "./components/WorkspaceView.vue";
 import SettingsView from "./components/SettingsView.vue";
 import CommandPalette from "./components/CommandPalette.vue";
-import UpdateBanner from "./components/UpdateBanner.vue";
+import UpdateModal from "./components/UpdateModal.vue";
 import VaultUnlockModal from "./components/VaultUnlockModal.vue";
 
 const vault = useVaultStore();
@@ -27,11 +28,22 @@ const identities = useIdentitiesStore();
 const workspaces = useWorkspacesStore();
 const tabs = useTabsStore();
 const ui = useUiStore();
+const update = useUpdateStore();
 
 const activeView = ref("hosts");
 const commandPaletteOpen = ref(false);
 
 const showMainContent = computed(() => activeView.value === "terminal");
+
+// Show update modal automatically when an update is detected (unless dismissed)
+watch(
+  () => update.shouldNotify,
+  (notify) => {
+    if (notify) {
+      update.showModal = true;
+    }
+  },
+);
 
 function handleKeydown(e: KeyboardEvent) {
   // Exit fullscreen on Escape
@@ -48,6 +60,11 @@ function handleKeydown(e: KeyboardEvent) {
     e.preventDefault();
     activeView.value = "terminal";
     tabs.newTab();
+  } else if (cmd && e.key === "u") {
+    e.preventDefault();
+    if (update.available) {
+      update.showUpdateDialog();
+    }
   } else if (cmd && e.key === ",") {
     e.preventDefault();
     activeView.value = "settings";
@@ -63,10 +80,18 @@ onMounted(async () => {
   await keys.load();
   await identities.load();
   await workspaces.load();
+
+  // Check for updates on startup (non-blocking)
+  await update.registerListeners();
+  await update.check();
+  if (update.shouldNotify) {
+    update.showModal = true;
+  }
 });
 
 onUnmounted(() => {
   window.removeEventListener("keydown", handleKeydown);
+  update.unregisterListeners();
 });
 </script>
 
@@ -96,7 +121,7 @@ onUnmounted(() => {
       @close="commandPaletteOpen = false"
       @navigate="activeView = $event; commandPaletteOpen = false"
     />
-    <UpdateBanner />
+    <UpdateModal />
     <VaultUnlockModal />
   </div>
 </template>
