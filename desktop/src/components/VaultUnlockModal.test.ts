@@ -79,8 +79,8 @@ describe("VaultUnlockModal", () => {
     await nextTick();
 
     expect(unlockWithBiometric).toHaveBeenCalledTimes(1);
-    expect(touchIdButton!.attributes("disabled")).toBeDefined();
-    expect(wrapper.get("#modal-pass").attributes("disabled")).toBeDefined();
+    expect((touchIdButton!.element as HTMLButtonElement).disabled).toBe(true);
+    expect((wrapper.get("#modal-pass").element as HTMLInputElement).disabled).toBe(true);
 
     const cancelButton = wrapper
       .findAll("button")
@@ -89,8 +89,8 @@ describe("VaultUnlockModal", () => {
       .findAll("button")
       .find((button) => button.text().trim() === "Unlock");
 
-    expect(cancelButton?.attributes("disabled")).toBeDefined();
-    expect(passwordUnlockButton?.attributes("disabled")).toBeDefined();
+    expect((cancelButton!.element as HTMLButtonElement).disabled).toBe(true);
+    expect((passwordUnlockButton!.element as HTMLButtonElement).disabled).toBe(true);
 
     await touchIdButton!.trigger("click");
     expect(unlockWithBiometric).toHaveBeenCalledTimes(1);
