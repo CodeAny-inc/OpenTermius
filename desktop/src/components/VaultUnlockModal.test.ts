@@ -79,7 +79,12 @@ describe("VaultUnlockModal", () => {
     await nextTick();
 
     expect(unlockWithBiometric).toHaveBeenCalledTimes(1);
-    expect((touchIdButton!.element as HTMLButtonElement).disabled).toBe(true);
+
+    const pendingTouchIdButton = wrapper
+      .findAll("button")
+      .find((button) => button.text().includes("Waiting for Touch ID"));
+    expect(pendingTouchIdButton).toBeDefined();
+    expect((pendingTouchIdButton!.element as HTMLButtonElement).disabled).toBe(true);
     expect((wrapper.get("#modal-pass").element as HTMLInputElement).disabled).toBe(true);
 
     const cancelButton = wrapper
@@ -92,7 +97,7 @@ describe("VaultUnlockModal", () => {
     expect((cancelButton!.element as HTMLButtonElement).disabled).toBe(true);
     expect((passwordUnlockButton!.element as HTMLButtonElement).disabled).toBe(true);
 
-    await touchIdButton!.trigger("click");
+    await pendingTouchIdButton!.trigger("click");
     expect(unlockWithBiometric).toHaveBeenCalledTimes(1);
     expect(ui.showVaultUnlockModal).toBe(true);
 
