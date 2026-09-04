@@ -25,7 +25,7 @@ export const updateIdentity = (identity: Identity) => invoke<Identity>("update_i
 export const deleteIdentity = (id: string) => invoke<void>("delete_identity", { id });
 
 export const vaultIsInitialized = () => invoke<boolean>("vault_is_initialized");
-export const initializeVault = (passphrase: string) => invoke<void>("initialize_vault", { passphrase });
+export const initializeVault = (passphrase: string) => invoke<void>("secure_initialize_vault", { passphrase });
 export const unlockVault = (passphrase: string) => invoke<void>("secure_unlock_vault", { passphrase });
 export const lockVault = () => invoke<void>("lock_vault");
 export const isVaultUnlocked = () => invoke<boolean>("is_vault_unlocked");

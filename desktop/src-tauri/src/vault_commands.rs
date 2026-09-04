@@ -12,7 +12,7 @@ fn err(e: impl std::fmt::Display) -> String {
 /// left behind by an older/reset vault. This backend invariant prevents a
 /// direct Tauri invocation from bypassing biometric lifecycle cleanup.
 #[tauri::command]
-pub async fn initialize_vault(
+pub async fn secure_initialize_vault(
     state: State<'_, Arc<AppState>>,
     passphrase: String,
 ) -> ApiResult<()> {
