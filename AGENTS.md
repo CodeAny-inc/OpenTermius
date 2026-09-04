@@ -63,7 +63,7 @@ Updates version in Cargo.toml, package.json, and tauri.conf.json.
 ### GitHub Actions: `.github/workflows/release.yml`
 Triggers on tag push (`v*.*.*`) or manual dispatch.
 - Builds on macOS (arm64 + x86_64), Linux, Windows in parallel
-- Signs all bundles with `TAURI_SIGNING_PRIVATE_KEY`
+- Signs all bundles with `TAURI_SIGNING_PRIVATE_KEY` (requires `createUpdaterArtifacts: true` in tauri.conf.json)
 - Auto-detects prerelease (alpha/beta/rc in version string)
 - Generates `latest.json` with all platform signatures
 - Uploads everything to the GitHub release

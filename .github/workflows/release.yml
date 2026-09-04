@@ -116,23 +116,20 @@ jobs:
           TAG: ${{ needs.prepare.outputs.tag }}
           RUST_TARGET: ${{ matrix.rust_target }}
         run: |
-          # tauri-action generates .sig files but doesn't always upload them.
-          # The Cargo workspace is at the repo root, so the target directory
-          # is at the repo root level, not desktop/src-tauri/target.
+          # Fallback: upload any .sig files that tauri-action didn't upload.
+          # With createUpdaterArtifacts: true, tauri-action should handle this,
+          # but we keep this as a safety net.
           echo "Working directory: $(pwd)"
           echo "GITHUB_WORKSPACE: ${GITHUB_WORKSPACE}"
           echo "RUST_TARGET: ${RUST_TARGET}"
 
-          # Determine the target directory based on whether we used a rust target
           if [ -n "$RUST_TARGET" ]; then
             TARGET_DIR="$GITHUB_WORKSPACE/target/$RUST_TARGET/release/bundle"
           else
             TARGET_DIR="$GITHUB_WORKSPACE/target/release/bundle"
           fi
-
           echo "Expected bundle dir: $TARGET_DIR"
 
-          # Also check alternative locations
           ALT_DIRS="$GITHUB_WORKSPACE/target/release/bundle $GITHUB_WORKSPACE/desktop/src-tauri/target/release/bundle"
           if [ -n "$RUST_TARGET" ]; then
             ALT_DIRS="$ALT_DIRS $GITHUB_WORKSPACE/target/$RUST_TARGET/release/bundle $GITHUB_WORKSPACE/desktop/src-tauri/target/$RUST_TARGET/release/bundle"
@@ -142,9 +139,7 @@ jobs:
             local sigfile="$1"
             local basename
             basename=$(basename "$sigfile")
-            # macOS .app.tar.gz.sig files don't include arch in filename,
-            # but the uploaded asset does (e.g. OpenTermius_aarch64.app.tar.gz).
-            # Rename the .sig to match the asset name.
+            # macOS .app.tar.gz.sig → rename to include arch
             if [ "$basename" = "OpenTermius.app.tar.gz.sig" ] && [ -n "$RUST_TARGET" ]; then
               local arch=""
               if [ "$RUST_TARGET" = "aarch64-apple-darwin" ]; then
@@ -168,7 +163,6 @@ jobs:
           for dir in $ALT_DIRS; do
             if [ -d "$dir" ]; then
               echo "Searching in: $dir"
-              # Use find with -exec to avoid pipe/subshell issues
               find "$dir" -name "*.sig" -type f -exec echo "Found: {}" \; 2>/dev/null || true
               SIG_LIST=$(find "$dir" -name "*.sig" -type f 2>/dev/null || true)
               if [ -n "$SIG_LIST" ]; then
@@ -282,20 +276,20 @@ jobs:
           else:
               print(f"WARNING: darwin-x86_64 missing (sig={bool(sig)}, url={url})")
 
-          # Linux x86_64 — AppImage with version, OpenTermius prefix
-          # e.g. OpenTermius_0.1.1-alpha.15_amd64.AppImage
-          sig = find_sig("*amd64.AppImage.sig")
-          url = find_asset_url("*amd64.AppImage")
+          # Linux x86_64 — with createUpdaterArtifacts, the updater
+          # artifact is .AppImage.tar.gz (not the raw .AppImage)
+          sig = find_sig("*amd64.AppImage.tar.gz.sig")
+          url = find_asset_url("*amd64.AppImage.tar.gz")
           if sig and url:
               platforms["linux-x86_64"] = {"signature": sig, "url": url}
               print(f"linux-x86_64: {url}")
           else:
               print(f"WARNING: linux-x86_64 missing (sig={bool(sig)}, url={url})")
 
-          # Windows x86_64 — NSIS setup exe with version
-          # e.g. OpenTermius_0.1.1-alpha.15_x64-setup.exe
-          sig = find_sig("*x64-setup.exe.sig")
-          url = find_asset_url("*x64-setup.exe")
+          # Windows x86_64 — with createUpdaterArtifacts, the updater
+          # artifact is .nsis.zip (not the raw .exe)
+          sig = find_sig("*x64-setup.exe.nsis.zip.sig")
+          url = find_asset_url("*x64-setup.exe.nsis.zip")
           if sig and url:
               platforms["windows-x86_64"] = {"signature": sig, "url": url}
               print(f"windows-x86_64: {url}")
