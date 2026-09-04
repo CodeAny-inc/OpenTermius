@@ -19,7 +19,7 @@ jobs:
       - name: Cargo check
         run: cargo check --workspace
       - name: Cargo test
-        run: cargo test -p opentermius-core || true
+        run: cargo test -p opentermius-core
 
   macos-rust-build:
     runs-on: macos-14
