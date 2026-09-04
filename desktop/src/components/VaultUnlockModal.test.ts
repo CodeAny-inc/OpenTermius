@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { flushPromises, mount, type VueWrapper } from "@vue/test-utils";
 import { createPinia, setActivePinia } from "pinia";
 import { nextTick } from "vue";
@@ -22,6 +22,10 @@ describe("VaultUnlockModal", () => {
     });
   });
 
+  afterEach(() => {
+    wrapper.unmount();
+  });
+
   it("offers Touch ID for the SSH unlock flow and resolves on success", async () => {
     const vault = useVaultStore();
     const ui = useUiStore();
@@ -30,7 +34,7 @@ describe("VaultUnlockModal", () => {
 
     const unlockWithBiometric = vi
       .spyOn(vault, "unlockWithBiometric")
-      .mockResolvedValue();
+      .mockResolvedValue(undefined);
 
     const unlockRequest = ui.requestVaultUnlock();
     await nextTick();
