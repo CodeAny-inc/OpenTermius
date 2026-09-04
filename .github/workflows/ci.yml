@@ -21,13 +21,13 @@ jobs:
       - name: Cargo test
         run: cargo test -p opentermius-core || true
 
-  macos-rust-check:
+  macos-rust-build:
     runs-on: macos-14
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-      - name: Cargo check (macOS)
-        run: cargo check --workspace
+      - name: Cargo build (macOS)
+        run: cargo build --workspace
 
   frontend-build:
     runs-on: ubuntu-latest
