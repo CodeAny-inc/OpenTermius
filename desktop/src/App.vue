@@ -8,6 +8,7 @@ import { useWorkspacesStore } from "./stores/workspaces";
 import { useTabsStore } from "./stores/tabs";
 import { useUiStore } from "./stores/ui";
 import { useUpdateStore } from "./stores/update";
+import { useAutoLock } from "./composables/useAutoLock";
 import AppSidebar from "./components/AppSidebar.vue";
 import TerminalArea from "./components/TerminalArea.vue";
 import HostList from "./components/HostList.vue";
@@ -30,6 +31,8 @@ const workspaces = useWorkspacesStore();
 const tabs = useTabsStore();
 const ui = useUiStore();
 const update = useUpdateStore();
+
+useAutoLock();
 
 const activeView = ref("hosts");
 const commandPaletteOpen = ref(false);
