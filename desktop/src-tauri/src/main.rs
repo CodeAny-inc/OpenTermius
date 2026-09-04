@@ -2,6 +2,7 @@
 
 mod biometric;
 mod commands;
+mod sftp_transfer;
 mod state;
 mod vault_commands;
 
@@ -82,6 +83,16 @@ fn main() {
             commands::session_resize,
             commands::close_session,
             commands::list_sessions,
+            commands::sftp_connect,
+            commands::sftp_list_dir,
+            commands::sftp_canonicalize,
+            commands::sftp_create_dir,
+            commands::sftp_remove_file,
+            commands::sftp_remove_dir,
+            commands::sftp_rename,
+            commands::sftp_close,
+            sftp_transfer::sftp_download_to_local,
+            sftp_transfer::sftp_upload_from_local,
             commands::read_key_file,
             commands::get_app_info,
             commands::check_for_updates,
