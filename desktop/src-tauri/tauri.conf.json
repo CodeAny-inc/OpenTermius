@@ -15,8 +15,8 @@
         "title": "OpenTermius",
         "width": 1100,
         "height": 720,
-        "minWidth": 720,
-        "minHeight": 480,
+        "minWidth": 480,
+        "minHeight": 400,
         "resizable": true
       }
     ],

@@ -108,6 +108,25 @@ jobs:
           prerelease: ${{ needs.prepare.outputs.is_prerelease }}
           args: ${{ matrix.args }}
 
+      - name: Upload .sig files to release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.prepare.outputs.tag }}
+        run: |
+          # tauri-action generates .sig files but doesn't always upload them.
+          # Find all .sig files in the bundle output and upload them manually.
+          BUNDLE_DIR="desktop/src-tauri/target"
+          if [ -n "${{ matrix.rust_target }}" ]; then
+            BUNDLE_DIR="$BUNDLE_DIR/${{ matrix.rust_target }}/release/bundle"
+          else
+            BUNDLE_DIR="$BUNDLE_DIR/release/bundle"
+          fi
+          echo "Looking for .sig files in $BUNDLE_DIR"
+          find "$BUNDLE_DIR" -name "*.sig" -type f | while read -r sigfile; do
+            echo "Uploading: $sigfile"
+            gh release upload "$TAG" "$sigfile" --clobber
+          done
+
   # ──────────────────────────────────────────────
   # Generate and upload latest.json (update manifest)
   # ──────────────────────────────────────────────
@@ -129,6 +148,9 @@ jobs:
           gh release download "$TAG" --dir ./assets --clobber
           echo "Downloaded assets:"
           ls -la ./assets
+          echo "---"
+          echo "Sig files:"
+          ls -la ./assets/*.sig 2>/dev/null || echo "NO .sig FILES FOUND"
 
       - name: Generate latest.json
         env:
@@ -136,40 +158,10 @@ jobs:
           VERSION: ${{ needs.prepare.outputs.version }}
           REPO: ${{ github.repository }}
         run: |
-          # Collect signatures and URLs for each platform
-          # Tauri generates <artifact>.sig alongside each bundle
-
-          # macOS aarch64
-          MACOS_ARM64_URL="https://github.com/${REPO}/releases/download/${TAG}/OpenTermius_${VERSION}_aarch64.app.tar.gz"
-          MACOS_ARM64_SIG=""
-          if [ -f "./assets/OpenTermius_${VERSION}_aarch64.app.tar.gz.sig" ]; then
-            MACOS_ARM64_SIG=$(cat "./assets/OpenTermius_${VERSION}_aarch64.app.tar.gz.sig")
-          fi
-
-          # macOS x86_64
-          MACOS_X64_URL="https://github.com/${REPO}/releases/download/${TAG}/OpenTermius_${VERSION}_x64.app.tar.gz"
-          MACOS_X64_SIG=""
-          if [ -f "./assets/OpenTermius_${VERSION}_x64.app.tar.gz.sig" ]; then
-            MACOS_X64_SIG=$(cat "./assets/OpenTermius_${VERSION}_x64.app.tar.gz.sig")
-          fi
-
-          # Linux x86_64 (AppImage)
-          LINUX_URL="https://github.com/${REPO}/releases/download/${TAG}/opentermius-desktop_${VERSION}_amd64.AppImage"
-          LINUX_SIG=""
-          if [ -f "./assets/opentermius-desktop_${VERSION}_amd64.AppImage.sig" ]; then
-            LINUX_SIG=$(cat "./assets/opentermius-desktop_${VERSION}_amd64.AppImage.sig")
-          fi
-
-          # Windows x86_64 (NSIS setup exe)
-          WINDOWS_URL="https://github.com/${REPO}/releases/download/${TAG}/OpenTermius_${VERSION}_x64-setup.exe"
-          WINDOWS_SIG=""
-          if [ -f "./assets/OpenTermius_${VERSION}_x64-setup.exe.sig" ]; then
-            WINDOWS_SIG=$(cat "./assets/OpenTermius_${VERSION}_x64-setup.exe.sig")
-          fi
-
           # Build the manifest with Python for proper JSON escaping
+          # Uses glob patterns to find .sig files regardless of exact naming
           python3 << 'PYEOF'
-          import json, os
+          import json, os, glob
 
           version = os.environ["VERSION"]
           tag = os.environ["TAG"]
@@ -182,39 +174,61 @@ jobs:
               except FileNotFoundError:
                   return ""
 
+          def find_sig(pattern):
+              matches = glob.glob(f"./assets/{pattern}")
+              if matches:
+                  return read_sig(matches[0])
+              return ""
+
+          def find_asset_url(pattern):
+              """Find the actual asset name on the release and return its URL."""
+              matches = glob.glob(f"./assets/{pattern}")
+              if matches:
+                  filename = os.path.basename(matches[0])
+                  return f"https://github.com/{repo}/releases/download/{tag}/{filename}"
+              return None
+
           platforms = {}
 
-          # macOS aarch64
-          sig = read_sig(f"./assets/OpenTermius_{version}_aarch64.app.tar.gz.sig")
-          if sig:
-              platforms["darwin-aarch64"] = {
-                  "signature": sig,
-                  "url": f"https://github.com/{repo}/releases/download/{tag}/OpenTermius_{version}_aarch64.app.tar.gz"
-              }
+          # macOS aarch64 — .app.tar.gz has NO version in filename
+          # e.g. OpenTermius_aarch64.app.tar.gz
+          sig = find_sig("*aarch64.app.tar.gz.sig")
+          url = find_asset_url("*aarch64.app.tar.gz")
+          if sig and url:
+              platforms["darwin-aarch64"] = {"signature": sig, "url": url}
+              print(f"darwin-aarch64: {url}")
+          else:
+              print(f"WARNING: darwin-aarch64 missing (sig={bool(sig)}, url={url})")
 
-          # macOS x86_64
-          sig = read_sig(f"./assets/OpenTermius_{version}_x64.app.tar.gz.sig")
-          if sig:
-              platforms["darwin-x86_64"] = {
-                  "signature": sig,
-                  "url": f"https://github.com/{repo}/releases/download/{tag}/OpenTermius_{version}_x64.app.tar.gz"
-              }
+          # macOS x86_64 — .app.tar.gz has NO version in filename
+          # e.g. OpenTermius_x64.app.tar.gz
+          sig = find_sig("*x64.app.tar.gz.sig")
+          url = find_asset_url("*x64.app.tar.gz")
+          if sig and url:
+              platforms["darwin-x86_64"] = {"signature": sig, "url": url}
+              print(f"darwin-x86_64: {url}")
+          else:
+              print(f"WARNING: darwin-x86_64 missing (sig={bool(sig)}, url={url})")
 
-          # Linux x86_64
-          sig = read_sig(f"./assets/opentermius-desktop_{version}_amd64.AppImage.sig")
-          if sig:
-              platforms["linux-x86_64"] = {
-                  "signature": sig,
-                  "url": f"https://github.com/{repo}/releases/download/{tag}/opentermius-desktop_{version}_amd64.AppImage"
-              }
+          # Linux x86_64 — AppImage with version, OpenTermius prefix
+          # e.g. OpenTermius_0.1.1-alpha.15_amd64.AppImage
+          sig = find_sig("*amd64.AppImage.sig")
+          url = find_asset_url("*amd64.AppImage")
+          if sig and url:
+              platforms["linux-x86_64"] = {"signature": sig, "url": url}
+              print(f"linux-x86_64: {url}")
+          else:
+              print(f"WARNING: linux-x86_64 missing (sig={bool(sig)}, url={url})")
 
-          # Windows x86_64
-          sig = read_sig(f"./assets/OpenTermius_{version}_x64-setup.exe.sig")
-          if sig:
-              platforms["windows-x86_64"] = {
-                  "signature": sig,
-                  "url": f"https://github.com/{repo}/releases/download/{tag}/OpenTermius_{version}_x64-setup.exe"
-              }
+          # Windows x86_64 — NSIS setup exe with version
+          # e.g. OpenTermius_0.1.1-alpha.15_x64-setup.exe
+          sig = find_sig("*x64-setup.exe.sig")
+          url = find_asset_url("*x64-setup.exe")
+          if sig and url:
+              platforms["windows-x86_64"] = {"signature": sig, "url": url}
+              print(f"windows-x86_64: {url}")
+          else:
+              print(f"WARNING: windows-x86_64 missing (sig={bool(sig)}, url={url})")
 
           manifest = {
               "version": version,
@@ -226,8 +240,18 @@ jobs:
           with open("latest.json", "w") as f:
               json.dump(manifest, f, indent=2)
 
-          print("Generated latest.json:")
+          print("\nGenerated latest.json:")
           print(json.dumps(manifest, indent=2))
+
+          if not platforms:
+              print("\nERROR: No platforms found! Check that .sig files were uploaded.")
+              print("Available .sig files:")
+              for f in sorted(glob.glob("./assets/*.sig")):
+                  print(f"  {f}")
+              print("All assets:")
+              for f in sorted(os.listdir("./assets")):
+                  print(f"  {f}")
+              exit(1)
           PYEOF
 
       - name: Upload latest.json to release

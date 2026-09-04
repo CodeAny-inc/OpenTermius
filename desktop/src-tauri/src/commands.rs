@@ -707,6 +707,45 @@ pub async fn check_with_prerelease_endpoint(
 
     tracing::info!("updater: using latest.json from {json_url}");
 
+    // Fetch the latest.json and check if platforms is empty before passing
+    // to the updater. This gives a clearer error than the updater's generic
+    // "none of the fallback platforms were found" message.
+    let client = reqwest::Client::builder()
+        .user_agent("opentermius-updater")
+        .build()
+        .map_err(|e| format!("http client: {e}"))?;
+    let manifest_resp = client
+        .get(&json_url)
+        .send()
+        .await
+        .map_err(|e| format!("fetch latest.json: {e}"))?;
+    if !manifest_resp.status().is_success() {
+        return Err(format!(
+            "latest.json returned {}",
+            manifest_resp.status()
+        ));
+    }
+    let manifest_text = manifest_resp
+        .text()
+        .await
+        .map_err(|e| format!("read latest.json: {e}"))?;
+    let manifest: serde_json::Value = serde_json::from_str(&manifest_text)
+        .map_err(|e| format!("parse latest.json: {e}"))?;
+    let platforms = manifest
+        .get("platforms")
+        .and_then(|p| p.as_object())
+        .map(|m| m.len())
+        .unwrap_or(0);
+    if platforms == 0 {
+        tracing::warn!("updater: latest.json has empty platforms, skipping update check");
+        return Err(
+            "Update manifest has no platform entries. \
+             The release may still be building — try again in a few minutes."
+                .to_string(),
+        );
+    }
+    tracing::info!("updater: latest.json has {platforms} platform(s)");
+
     let parsed_url: url::Url = json_url
         .parse()
         .map_err(|e: url::ParseError| e.to_string())?;
