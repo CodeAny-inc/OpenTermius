@@ -24,8 +24,17 @@
 
 ## Auto-update
 - Uses `tauri-plugin-updater` (configured in `tauri.conf.json` under `plugins.updater`)
-- Endpoint: `https://github.com/CodeAny-inc/OpenTermius/releases/latest/download/latest.json`
-- To switch to a custom CDN later: change the `endpoints` array in `tauri.conf.json`
+- **Important**: The endpoint in `tauri.conf.json` is only a fallback. The actual
+  update check uses a custom implementation in `commands.rs` that queries the
+  GitHub API (`/releases` endpoint) to find the newest release — **including
+  prereleases**. GitHub's `releases/latest` redirect excludes prereleases, so
+  the default Tauri updater endpoint doesn't work for alpha/beta releases.
+- The custom check (`check_with_prerelease_endpoint`):
+  1. Calls `https://api.github.com/repos/CodeAny-inc/OpenTermius/releases`
+  2. Parses all release tags as semver versions
+  3. Picks the highest version that has a `latest.json` asset
+  4. Builds a Tauri updater with that release's `latest.json` URL as the endpoint
+  5. The plugin handles download, signature verification, and installation
 - App checks for updates on startup (release builds only, silent)
 - Frontend shows `UpdateBanner` when an update is available
 - User clicks "Download & Restart" → downloads, verifies signature, installs, restarts
