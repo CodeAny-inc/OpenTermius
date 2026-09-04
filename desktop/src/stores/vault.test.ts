@@ -21,6 +21,11 @@ describe("vault store", () => {
   beforeEach(() => {
     setActivePinia(createPinia());
     vi.clearAllMocks();
+    vi.mocked(api.vaultIsInitialized).mockResolvedValue(false);
+    vi.mocked(api.isVaultUnlocked).mockResolvedValue(false);
+    vi.mocked(api.initializeVault).mockResolvedValue(undefined);
+    vi.mocked(api.unlockVault).mockResolvedValue(undefined);
+    vi.mocked(api.lockVault).mockResolvedValue(undefined);
     vi.mocked(api.biometricAvailable).mockResolvedValue(false);
     vi.mocked(api.biometricPassphraseStored).mockResolvedValue(false);
     vi.mocked(api.unlockWithBiometric).mockResolvedValue(true);
@@ -53,8 +58,22 @@ describe("vault store", () => {
       expect(store.needsUnlock).toBe(true);
     });
 
+    it("does not attach a stale biometric credential to an uninitialized vault", async () => {
+      const store = useVaultStore();
+      vi.mocked(api.biometricAvailable).mockResolvedValue(true);
+      vi.mocked(api.biometricPassphraseStored).mockResolvedValue(true);
+
+      await store.checkStatus();
+
+      expect(api.biometricPassphraseStored).not.toHaveBeenCalled();
+      expect(store.initialized).toBe(false);
+      expect(store.biometricAvailable).toBe(true);
+      expect(store.biometricEnabled).toBe(false);
+    });
+
     it("uses the protected Keychain item as biometric source of truth", async () => {
       const store = useVaultStore();
+      vi.mocked(api.vaultIsInitialized).mockResolvedValue(true);
       vi.mocked(api.biometricAvailable).mockResolvedValue(true);
       vi.mocked(api.biometricPassphraseStored).mockResolvedValue(true);
 
@@ -68,6 +87,7 @@ describe("vault store", () => {
 
     it("fails closed when the protected Keychain state cannot be queried", async () => {
       const store = useVaultStore();
+      vi.mocked(api.vaultIsInitialized).mockResolvedValue(true);
       vi.mocked(api.biometricAvailable).mockResolvedValue(true);
       vi.mocked(api.biometricPassphraseStored).mockRejectedValue(
         new Error("Keychain unavailable"),
@@ -82,22 +102,44 @@ describe("vault store", () => {
   });
 
   describe("initialize", () => {
-    it("initializes and unlocks the vault", async () => {
+    it("clears any stale biometric credential before creating a new vault", async () => {
       const store = useVaultStore();
+      store.biometricEnabled = true;
 
       await store.initialize("my-passphrase");
 
+      expect(api.clearBiometricPassphrase).toHaveBeenCalledTimes(1);
       expect(api.initializeVault).toHaveBeenCalledWith("my-passphrase");
+      expect(
+        vi.mocked(api.clearBiometricPassphrase).mock.invocationCallOrder[0],
+      ).toBeLessThan(vi.mocked(api.initializeVault).mock.invocationCallOrder[0]);
+      expect(store.biometricEnabled).toBe(false);
       expect(store.initialized).toBe(true);
       expect(store.unlocked).toBe(true);
       expect(store.error).toBeNull();
     });
 
-    it("sets error on failure", async () => {
+    it("does not create a new vault when stale biometric cleanup fails", async () => {
+      const store = useVaultStore();
+      vi.mocked(api.clearBiometricPassphrase).mockRejectedValue(
+        new Error("Keychain delete failed"),
+      );
+
+      await expect(store.initialize("my-passphrase")).rejects.toThrow(
+        "Keychain delete failed",
+      );
+
+      expect(api.initializeVault).not.toHaveBeenCalled();
+      expect(store.initialized).toBe(false);
+      expect(store.unlocked).toBe(false);
+      expect(store.error).toBe("Error: Keychain delete failed");
+    });
+
+    it("sets error on vault initialization failure", async () => {
       const store = useVaultStore();
       vi.mocked(api.initializeVault).mockRejectedValue(new Error("Weak passphrase"));
 
-      await store.initialize("weak");
+      await expect(store.initialize("weak")).rejects.toThrow("Weak passphrase");
 
       expect(store.initialized).toBe(false);
       expect(store.error).toBe("Error: Weak passphrase");
@@ -130,6 +172,7 @@ describe("vault store", () => {
   describe("unlockWithBiometric", () => {
     it("disables biometric UI when the protected credential is gone after a failed unlock", async () => {
       const store = useVaultStore();
+      store.initialized = true;
       store.biometricAvailable = true;
       store.biometricEnabled = true;
       vi.mocked(api.unlockWithBiometric).mockRejectedValue(
@@ -148,6 +191,7 @@ describe("vault store", () => {
 
     it("keeps biometric UI enabled when a failed attempt leaves the credential stored", async () => {
       const store = useVaultStore();
+      store.initialized = true;
       store.biometricAvailable = true;
       store.biometricEnabled = true;
       vi.mocked(api.unlockWithBiometric).mockRejectedValue(
@@ -165,6 +209,7 @@ describe("vault store", () => {
 
     it("fails closed if the post-failure Keychain probe also fails", async () => {
       const store = useVaultStore();
+      store.initialized = true;
       store.biometricAvailable = true;
       store.biometricEnabled = true;
       vi.mocked(api.unlockWithBiometric).mockRejectedValue(

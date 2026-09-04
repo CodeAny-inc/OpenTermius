@@ -208,7 +208,10 @@ mod stub {
         Err("biometric unlock is not available in this build".into())
     }
     pub fn clear_passphrase() -> Result<(), String> {
-        Err("biometric unlock is not available in this build".into())
+        // Clearing is an idempotent lifecycle operation. Unsupported builds
+        // have no biometric credential to remove, so treating this as success
+        // lets new-vault initialization perform unconditional stale-item cleanup.
+        Ok(())
     }
 }
 
@@ -276,7 +279,8 @@ pub async fn unlock_with_biometric(state: State<'_, Arc<AppState>>) -> ApiResult
     Ok(true)
 }
 
-/// Remove the biometric passphrase from the OS keychain.
+/// Remove the biometric passphrase from the OS keychain. This is idempotent;
+/// unsupported builds have no biometric credential and therefore succeed.
 #[tauri::command]
 pub async fn clear_biometric_passphrase() -> ApiResult<()> {
     platform::clear_passphrase()

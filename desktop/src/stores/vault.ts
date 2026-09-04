@@ -16,7 +16,7 @@ export const useVaultStore = defineStore("vault", () => {
 
   async function reconcileBiometricState() {
     biometricEnabled.value = false;
-    if (!biometricAvailable.value) return;
+    if (!initialized.value || !biometricAvailable.value) return;
 
     // This backend query is explicitly non-interactive, so it is safe to use
     // after a failed Touch ID attempt to distinguish cancellation/transient
@@ -31,8 +31,9 @@ export const useVaultStore = defineStore("vault", () => {
     biometricAvailable.value = await api.biometricAvailable();
 
     try {
-      // The protected Keychain item is the source of truth for whether the UI
-      // should offer Touch ID.
+      // The protected Keychain item is the source of truth only for an existing
+      // vault. A stale credential must never make a not-yet-created vault look
+      // biometric-enabled.
       await reconcileBiometricState();
     } catch (e) {
       // Fail closed: never advertise biometric unlock if the Keychain state
@@ -44,11 +45,18 @@ export const useVaultStore = defineStore("vault", () => {
   async function initialize(passphrase: string) {
     error.value = null;
     try {
+      // A Keychain item can outlive vault.json. Remove any old biometric
+      // credential before creating a new vault so the new vault never silently
+      // inherits biometric unlock from an unrelated previous vault.
+      await api.clearBiometricPassphrase();
+      biometricEnabled.value = false;
+
       await api.initializeVault(passphrase);
       initialized.value = true;
       unlocked.value = true;
     } catch (e) {
       error.value = String(e);
+      throw e;
     }
   }
 

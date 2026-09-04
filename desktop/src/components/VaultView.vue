@@ -21,7 +21,7 @@ const vault = useVaultStore();
 const passphrase = ref("");
 const confirmPassphrase = ref("");
 const error = ref("");
-const biometricLoading = ref(false);
+const unlockLoading = ref<"password" | "biometric" | null>(null);
 const enableBiometricMode = ref(false);
 const biometricPassphrase = ref("");
 
@@ -55,12 +55,16 @@ async function setup() {
 }
 
 async function unlock() {
+  if (!passphrase.value || unlockLoading.value !== null) return;
   error.value = "";
+  unlockLoading.value = "password";
   try {
     await vault.unlock(passphrase.value);
     passphrase.value = "";
   } catch (e: any) {
     error.value = String(e);
+  } finally {
+    unlockLoading.value = null;
   }
 }
 
@@ -69,14 +73,15 @@ async function lock() {
 }
 
 async function tryBiometricUnlock() {
-  biometricLoading.value = true;
+  if (unlockLoading.value !== null) return;
+  unlockLoading.value = "biometric";
   error.value = "";
   try {
     await vault.unlockWithBiometric();
   } catch (e: any) {
     error.value = String(e);
   } finally {
-    biometricLoading.value = false;
+    unlockLoading.value = null;
   }
 }
 
@@ -171,12 +176,16 @@ const showBiometricButton = computed(
           <Button
             v-if="showBiometricButton"
             variant="outline"
-            :disabled="biometricLoading"
+            :disabled="unlockLoading !== null"
             @click="tryBiometricUnlock"
           >
-            <Loader2 v-if="biometricLoading" class="size-3.5 mr-1 animate-spin" :stroke-width="1.75" />
+            <Loader2
+              v-if="unlockLoading === 'biometric'"
+              class="size-3.5 mr-1 animate-spin"
+              :stroke-width="1.75"
+            />
             <Fingerprint v-else class="size-3.5" :stroke-width="1.75" />
-            {{ biometricLoading ? "Waiting for Touch ID..." : "Unlock with Touch ID" }}
+            {{ unlockLoading === "biometric" ? "Waiting for Touch ID..." : "Unlock with Touch ID" }}
           </Button>
 
           <div v-if="showBiometricButton" class="flex items-center gap-2 text-[11px] text-muted-foreground">
@@ -192,12 +201,18 @@ const showBiometricButton = computed(
               v-model="passphrase"
               type="password"
               placeholder="Enter master passphrase"
+              :disabled="unlockLoading !== null"
               @keydown.enter="unlock"
             />
           </FormGroup>
           <p v-if="displayRuntimeError" class="text-[12px] text-destructive">{{ displayRuntimeError }}</p>
-          <Button @click="unlock">
-            <Unlock class="size-3.5" :stroke-width="1.75" />
+          <Button :disabled="unlockLoading !== null || !passphrase" @click="unlock">
+            <Loader2
+              v-if="unlockLoading === 'password'"
+              class="size-3.5 mr-1 animate-spin"
+              :stroke-width="1.75"
+            />
+            <Unlock v-else class="size-3.5" :stroke-width="1.75" />
             Unlock
           </Button>
         </div>

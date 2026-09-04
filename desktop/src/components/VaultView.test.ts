@@ -31,6 +31,52 @@ describe("VaultView biometric settings", () => {
     wrapper.unmount();
   });
 
+  it("blocks passphrase unlock while Touch ID is pending", async () => {
+    const pinia = createPinia();
+    setActivePinia(pinia);
+    const vault = useVaultStore();
+
+    vault.initialized = true;
+    vault.unlocked = false;
+    vault.biometricAvailable = true;
+    vault.biometricEnabled = true;
+
+    vi.spyOn(vault, "checkStatus").mockResolvedValue(undefined);
+    let finishBiometric!: () => void;
+    const unlockWithBiometric = vi
+      .spyOn(vault, "unlockWithBiometric")
+      .mockImplementation(
+        () =>
+          new Promise<void>((resolve) => {
+            finishBiometric = resolve;
+          }),
+      );
+    const unlock = vi.spyOn(vault, "unlock").mockResolvedValue(undefined);
+
+    const wrapper = mount(VaultView, {
+      global: {
+        plugins: [pinia],
+      },
+    });
+    await flushPromises();
+
+    expect(unlockWithBiometric).toHaveBeenCalledTimes(1);
+    expect((wrapper.get("#unlock-pass").element as HTMLInputElement).disabled).toBe(true);
+
+    const passwordUnlockButton = wrapper
+      .findAll("button")
+      .find((button) => button.text().trim() === "Unlock");
+    expect(passwordUnlockButton).toBeDefined();
+    expect((passwordUnlockButton!.element as HTMLButtonElement).disabled).toBe(true);
+
+    await passwordUnlockButton!.trigger("click");
+    expect(unlock).not.toHaveBeenCalled();
+
+    finishBiometric();
+    await flushPromises();
+    wrapper.unmount();
+  });
+
   it("shows the Keychain error when disabling biometric unlock fails", async () => {
     const pinia = createPinia();
     setActivePinia(pinia);
