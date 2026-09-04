@@ -1,11 +1,18 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, watch, nextTick } from "vue";
+import { ref, onMounted, onUnmounted } from "vue";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import "@xterm/xterm/css/xterm.css";
 import { useTabsStore, type Pane } from "../stores/tabs";
 import { useHostsStore } from "../stores/hosts";
 import * as api from "../api";
+import {
+  SplitSquareHorizontal,
+  SplitSquareVertical,
+  X,
+  Circle,
+  CircleDot,
+} from "lucide-vue-next";
 import type { UnlistenFn } from "@tauri-apps/api/event";
 
 const props = defineProps<{
@@ -34,7 +41,7 @@ onMounted(async () => {
 
   term = new Terminal({
     fontSize: 13,
-    fontFamily: "Menlo, Monaco, 'Courier New', monospace",
+    fontFamily: "'SFMono-Regular', 'SF Mono', 'Cascadia Code', 'Roboto Mono', ui-monospace, monospace",
     theme: {
       background: "#000000",
       foreground: "#e6e9ef",
@@ -50,10 +57,8 @@ onMounted(async () => {
   term.open(containerRef.value);
   fitAddon.fit();
 
-  // Connect to session
   await connectSession();
 
-  // Handle terminal input
   term.onData((data) => {
     if (props.pane.sessionId) {
       const bytes = Array.from(new TextEncoder().encode(data));
@@ -61,7 +66,6 @@ onMounted(async () => {
     }
   });
 
-  // Listen for session data events
   unlistenData = await api.onSessionData((event) => {
     if (event.session_id === props.pane.sessionId && term) {
       const data = new Uint8Array(event.data);
@@ -75,16 +79,11 @@ onMounted(async () => {
     }
   });
 
-  // Handle resize
   resizeObserver = new ResizeObserver(() => {
     if (fitAddon && term) {
       fitAddon.fit();
       if (props.pane.sessionId) {
-        api.sessionResize(
-          props.pane.sessionId,
-          term.cols,
-          term.rows,
-        );
+        api.sessionResize(props.pane.sessionId, term.cols, term.rows);
       }
     }
   });
@@ -112,7 +111,7 @@ async function connectSession() {
       return;
     }
     try {
-      const password = null; // TODO: get from keychain
+      const password = null;
       await api.connectSsh(sessionId, host, password, term.cols, term.rows);
       tabs.setPaneConnected(props.pane.id, sessionId);
     } catch (e) {
@@ -123,17 +122,49 @@ async function connectSession() {
 </script>
 
 <template>
-  <div class="terminal-pane">
-    <div class="terminal-header">
-      <span>{{ pane.title }}</span>
-      <span v-if="pane.connected" style="color: var(--ok)">●</span>
-      <span v-else style="color: var(--muted)">○</span>
-      <div class="pane-actions">
-        <button title="Split horizontally" @click="emit('split-h')">⊞</button>
-        <button title="Split vertically" @click="emit('split-v')">⊟</button>
-        <button title="Close pane" @click="emit('close')">×</button>
+  <div class="flex flex-col w-full h-full">
+    <!-- Pane header — compact, quiet -->
+    <div class="flex h-6 items-center gap-1.5 px-2 bg-sidebar border-b border-sidebar-border flex-shrink-0">
+      <CircleDot
+        v-if="pane.connected"
+        class="size-2.5 text-green-500"
+        :stroke-width="0"
+        fill="currentColor"
+      />
+      <Circle
+        v-else
+        class="size-2.5 text-muted-foreground"
+        :stroke-width="1.75"
+      />
+      <span class="text-[11px] text-muted-foreground truncate flex-1">{{ pane.title }}</span>
+      <div class="flex items-center gap-0.5">
+        <button
+          class="flex h-5 w-5 items-center justify-center rounded text-muted-foreground hover:bg-sidebar-accent hover:text-foreground transition-colors duration-100"
+          aria-label="Split horizontally"
+          title="Split horizontally"
+          @click="emit('split-h')"
+        >
+          <SplitSquareHorizontal class="size-3" :stroke-width="1.75" />
+        </button>
+        <button
+          class="flex h-5 w-5 items-center justify-center rounded text-muted-foreground hover:bg-sidebar-accent hover:text-foreground transition-colors duration-100"
+          aria-label="Split vertically"
+          title="Split vertically"
+          @click="emit('split-v')"
+        >
+          <SplitSquareVertical class="size-3" :stroke-width="1.75" />
+        </button>
+        <button
+          class="flex h-5 w-5 items-center justify-center rounded text-muted-foreground hover:bg-destructive/20 hover:text-destructive transition-colors duration-100"
+          aria-label="Close pane"
+          title="Close pane"
+          @click="emit('close')"
+        >
+          <X class="size-3" :stroke-width="1.75" />
+        </button>
       </div>
     </div>
-    <div ref="containerRef" class="terminal-body"></div>
+    <!-- Terminal body -->
+    <div ref="containerRef" class="flex-1 overflow-hidden bg-black"></div>
   </div>
 </template>

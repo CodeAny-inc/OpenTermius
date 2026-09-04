@@ -1,21 +1,57 @@
 <script setup lang="ts">
-import { ref, onMounted } from "vue";
+import { ref, computed, onMounted } from "vue";
 import * as api from "../api";
+import Input from "./ui/Input.vue";
+import Badge from "./ui/Badge.vue";
+import {
+  ShieldCheck,
+  Trash2,
+  Search,
+  Fingerprint,
+} from "lucide-vue-next";
 import type { KnownHostEntry } from "../types";
 
-const knownHosts = ref<KnownHostEntry[]>([]);
+const hosts = ref<KnownHostEntry[]>([]);
+const search = ref("");
+const loading = ref(false);
 
 onMounted(async () => {
   await load();
 });
 
 async function load() {
-  knownHosts.value = await api.listKnownHosts();
+  loading.value = true;
+  try {
+    hosts.value = await api.listKnownHosts();
+  } finally {
+    loading.value = false;
+  }
 }
 
-async function remove(host: string, port: number) {
-  const display = `${host}:${port}`;
-  if (confirm(`Remove known host entry for ${display}?`)) {
+const filteredHosts = computed(() => {
+  if (!search.value.trim()) return hosts.value;
+  const q = search.value.toLowerCase();
+  return hosts.value.filter(
+    (h) =>
+      h.host.toLowerCase().includes(q) ||
+      h.fingerprint.toLowerCase().includes(q),
+  );
+});
+
+function parseHostPort(entry: string): [string, number] {
+  // known_hosts entries may be "host" or "host:port" or "[host]:port"
+  const m = entry.match(/^\[([^\]]+)\]:(\d+)$/);
+  if (m) return [m[1], parseInt(m[2], 10)];
+  const parts = entry.split(":");
+  if (parts.length === 2 && /^\d+$/.test(parts[1])) {
+    return [parts[0], parseInt(parts[1], 10)];
+  }
+  return [entry, 22];
+}
+
+async function remove(entry: KnownHostEntry) {
+  const [host, port] = parseHostPort(entry.host);
+  if (confirm(`Remove known host "${entry.host}"?`)) {
     await api.removeKnownHost(host, port);
     await load();
   }
@@ -23,33 +59,66 @@ async function remove(host: string, port: number) {
 </script>
 
 <template>
-  <div style="padding: 16px; overflow-y: auto; height: 100%;">
-    <h2 style="font-size: 16px; margin-bottom: 16px;">Known Hosts</h2>
-    <p style="font-size: 12px; color: var(--muted); margin-bottom: 16px;">
-      Host keys are recorded on first connection (trust-on-first-use).
-      If a host's key changes, the connection will be rejected. Remove an
-      entry here to re-establish trust.
-    </p>
-
-    <div v-if="knownHosts.length">
-      <div
-        v-for="(entry, i) in knownHosts"
-        :key="i"
-        class="key-item"
-      >
-        <div class="key-info">
-          <div class="key-label">{{ entry.host }}</div>
-          <div class="key-meta">{{ entry.key_type }} · {{ entry.fingerprint.slice(0, 48) }}...</div>
-        </div>
-        <button
-          class="icon-btn"
-          @click="remove(entry.host, parseInt(entry.host.split(':')[1] || '22'))"
-          title="Remove"
-        >🗑</button>
+  <div class="flex flex-col h-full overflow-hidden">
+    <!-- Header -->
+    <div class="flex h-11 items-center gap-2 border-b border-border px-4">
+      <h2 class="text-[14px] font-semibold">Known Hosts</h2>
+      <div class="ml-auto text-[12px] text-muted-foreground">
+        {{ hosts.length }} host{{ hosts.length === 1 ? '' : 's' }}
       </div>
     </div>
-    <div v-else class="empty-state" style="padding: 40px;">
-      <p>No known hosts recorded yet</p>
+
+    <!-- Search -->
+    <div class="px-3 py-2 border-b border-border">
+      <div class="relative">
+        <Search class="absolute left-2.5 top-1/2 -translate-y-1/2 size-3.5 text-muted-foreground" :stroke-width="1.75" />
+        <Input v-model="search" placeholder="Search by hostname or fingerprint..." class="pl-8" />
+      </div>
+    </div>
+
+    <!-- Content -->
+    <div class="flex-1 overflow-y-auto p-3">
+      <div v-if="loading" class="py-12 text-center text-[13px] text-muted-foreground">Loading...</div>
+
+      <div v-else-if="filteredHosts.length" class="flex flex-col gap-1.5">
+        <div
+          v-for="(host, i) in filteredHosts"
+          :key="i"
+          class="group flex items-start gap-3 rounded-md border border-border bg-card p-3 transition-colors duration-100 hover:border-muted-foreground/30"
+        >
+          <div class="flex h-9 w-9 items-center justify-center rounded-md shrink-0 bg-green-500/10">
+            <ShieldCheck class="size-4 text-green-500" :stroke-width="1.75" />
+          </div>
+          <div class="flex-1 min-w-0">
+            <div class="flex items-center gap-2">
+              <span class="text-[13px] font-medium truncate font-mono">{{ host.host }}</span>
+              <Badge>{{ host.key_type }}</Badge>
+            </div>
+            <div class="flex items-center gap-1.5 mt-1 text-[11px] text-muted-foreground">
+              <Fingerprint class="size-3" :stroke-width="1.75" />
+              <span class="font-mono truncate">{{ host.fingerprint }}</span>
+            </div>
+          </div>
+          <button
+            class="flex h-7 w-7 items-center justify-center rounded text-muted-foreground opacity-0 group-hover:opacity-100 hover:bg-destructive/20 hover:text-destructive transition-all duration-100"
+            aria-label="Remove known host"
+            @click="remove(host)"
+          >
+            <Trash2 class="size-3.5" :stroke-width="1.75" />
+          </button>
+        </div>
+      </div>
+
+      <!-- Empty state -->
+      <div v-else class="flex flex-col items-center justify-center py-16 px-6 gap-3 text-center">
+        <ShieldCheck class="size-8 text-muted-foreground/50" :stroke-width="1.5" />
+        <div>
+          <p class="text-[14px] font-medium text-foreground">No known hosts</p>
+          <p class="text-[12px] text-muted-foreground mt-1">
+            Hosts you connect to will appear here after first use (TOFU)
+          </p>
+        </div>
+      </div>
     </div>
   </div>
 </template>

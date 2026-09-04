@@ -1,7 +1,13 @@
 <script setup lang="ts">
-import { ref, onMounted, computed } from "vue";
+import { ref, computed, watch } from "vue";
 import { useHostsStore } from "../stores/hosts";
 import { useKeysStore } from "../stores/keys";
+import Dialog from "./ui/Dialog.vue";
+import Button from "./ui/Button.vue";
+import Input from "./ui/Input.vue";
+import Select from "./ui/Select.vue";
+import FormGroup from "./ui/FormGroup.vue";
+import Label from "./ui/Label.vue";
 import type { Host, AuthMethod } from "../types";
 
 const props = defineProps<{ host: Host | null }>();
@@ -10,64 +16,92 @@ const emit = defineEmits<{ close: [] }>();
 const hosts = useHostsStore();
 const keys = useKeysStore();
 
-const label = ref("");
-const hostname = ref("");
-const port = ref(22);
-const username = ref("");
-const groupId = ref<string | null>(null);
-const authType = ref<"agent" | "password" | "publickey">("agent");
-const keyId = ref<string | null>(null);
-const password = ref("");
-const startupCommand = ref("");
-const tags = ref("");
-
-onMounted(async () => {
-  await keys.load();
-  if (props.host) {
-    label.value = props.host.label;
-    hostname.value = props.host.hostname;
-    port.value = props.host.port;
-    username.value = props.host.username;
-    groupId.value = props.host.group_id ?? null;
-    keyId.value = props.host.key_id ?? null;
-    startupCommand.value = props.host.startup_command ?? "";
-    tags.value = props.host.tags.join(", ");
-    if (typeof props.host.auth === "object" && "password" in props.host.auth) {
-      authType.value = "password";
-    } else if (props.host.auth === "publickey") {
-      authType.value = "publickey";
-    } else {
-      authType.value = "agent";
-    }
-  }
+const form = ref({
+  label: "",
+  hostname: "",
+  port: 22,
+  username: "",
+  authMode: "password" as "password" | "publickey" | "agent",
+  credentialKey: "",
+  keyId: "",
+  groupId: "",
+  tags: "",
 });
 
-async function save() {
-  const auth: AuthMethod =
-    authType.value === "password"
-      ? { password: { credential_key: `host-${label.value}` } }
-      : authType.value === "publickey"
-        ? "publickey"
-        : "agent";
+watch(
+  () => props.host,
+  (host) => {
+    if (host) {
+      const authMode: "password" | "publickey" | "agent" =
+        typeof host.auth === "string" ? host.auth : "password";
+      const credentialKey =
+        typeof host.auth === "object" && "password" in host.auth
+          ? host.auth.password.credential_key
+          : "";
+      form.value = {
+        label: host.label,
+        hostname: host.hostname,
+        port: host.port,
+        username: host.username,
+        authMode,
+        credentialKey,
+        keyId: host.key_id || "",
+        groupId: host.group_id || "",
+        tags: host.tags.join(", "),
+      };
+    } else {
+      form.value = {
+        label: "",
+        hostname: "",
+        port: 22,
+        username: "",
+        authMode: "password",
+        credentialKey: "",
+        keyId: "",
+        groupId: "",
+        tags: "",
+      };
+    }
+  },
+  { immediate: true },
+);
 
+const isValid = computed(() => {
+  return (
+    form.value.label.trim() &&
+    form.value.hostname.trim() &&
+    form.value.username.trim() &&
+    form.value.port > 0
+  );
+});
+
+function buildAuth(): AuthMethod {
+  if (form.value.authMode === "publickey") return "publickey";
+  if (form.value.authMode === "agent") return "agent";
+  return {
+    password: { credential_key: form.value.credentialKey || "default" },
+  };
+}
+
+async function save() {
+  if (!isValid.value) return;
   const host: Host = {
-    id: props.host?.id ?? crypto.randomUUID(),
-    label: label.value,
-    hostname: hostname.value,
-    port: port.value,
-    username: username.value,
-    group_id: groupId.value,
-    key_id: authType.value === "publickey" ? keyId.value : null,
-    auth,
-    tags: tags.value
+    id: props.host?.id ?? "",
+    label: form.value.label.trim(),
+    hostname: form.value.hostname.trim(),
+    port: form.value.port,
+    username: form.value.username.trim(),
+    group_id: form.value.groupId || null,
+    key_id: form.value.authMode === "publickey" ? form.value.keyId || null : null,
+    auth: buildAuth(),
+    tags: form.value.tags
       .split(",")
       .map((t) => t.trim())
       .filter(Boolean),
-    startup_command: startupCommand.value || null,
-    proxy_command: null,
-    jump_host_id: null,
+    startup_command: props.host?.startup_command ?? null,
+    proxy_command: props.host?.proxy_command ?? null,
+    jump_host_id: props.host?.jump_host_id ?? null,
   };
-
   if (props.host) {
     await hosts.updateHost(host);
   } else {
@@ -78,69 +112,83 @@ async function save() {
 </script>
 
 <template>
-  <div class="modal-overlay" @click.self="emit('close')">
-    <div class="modal">
-      <h2>{{ props.host ? "Edit Host" : "Add Host" }}</h2>
-      <div class="form-row">
-        <div class="form-group">
-          <label>Label</label>
-          <input v-model="label" placeholder="My Server" />
-        </div>
-        <div class="form-group" style="max-width: 100px;">
-          <label>Port</label>
-          <input v-model.number="port" type="number" />
-        </div>
+  <Dialog
+    :open="true"
+    :title="host ? 'Edit Host' : 'Add Host'"
+    description="Configure SSH connection details"
+    width="520px"
+    @close="emit('close')"
+  >
+    <div class="flex flex-col gap-4">
+      <FormGroup>
+        <Label for="host-label">Label</Label>
+        <Input id="host-label" v-model="form.label" placeholder="My server" />
+      </FormGroup>
+
+      <div class="grid grid-cols-3 gap-3">
+        <FormGroup class="col-span-2">
+          <Label for="host-hostname">Hostname</Label>
+          <Input id="host-hostname" v-model="form.hostname" placeholder="example.com or 1.2.3.4" />
+        </FormGroup>
+        <FormGroup>
+          <Label for="host-port">Port</Label>
+          <Input id="host-port" v-model.number="form.port" type="number" />
+        </FormGroup>
       </div>
-      <div class="form-group">
-        <label>Hostname</label>
-        <input v-model="hostname" placeholder="example.com" />
-      </div>
-      <div class="form-row">
-        <div class="form-group">
-          <label>Username</label>
-          <input v-model="username" placeholder="root" />
-        </div>
-        <div class="form-group">
-          <label>Group</label>
-          <select v-model="groupId">
-            <option :value="null">None</option>
-            <option v-for="g in hosts.groups" :key="g.id" :value="g.id">{{ g.name }}</option>
-          </select>
-        </div>
-      </div>
-      <div class="form-group">
-        <label>Authentication</label>
-        <select v-model="authType">
-          <option value="agent">SSH Agent</option>
+
+      <FormGroup>
+        <Label for="host-username">Username</Label>
+        <Input id="host-username" v-model="form.username" placeholder="root" />
+      </FormGroup>
+
+      <FormGroup>
+        <Label>Authentication method</Label>
+        <Select v-model="form.authMode">
           <option value="password">Password</option>
-          <option value="publickey">Public Key</option>
-        </select>
-      </div>
-      <div v-if="authType === 'publickey'" class="form-group">
-        <label>Key</label>
-        <select v-model="keyId">
-          <option :value="null">Select a key...</option>
+          <option value="publickey">SSH Key</option>
+          <option value="agent">SSH Agent</option>
+        </Select>
+      </FormGroup>
+
+      <FormGroup v-if="form.authMode === 'password'">
+        <Label for="host-cred">Credential key</Label>
+        <Input id="host-cred" v-model="form.credentialKey" placeholder="Vault credential key (e.g. 'default')" />
+      </FormGroup>
+
+      <FormGroup v-else-if="form.authMode === 'publickey'">
+        <Label for="host-key">SSH Key</Label>
+        <Select id="host-key" v-model="form.keyId">
+          <option value="">Select a key...</option>
           <option v-for="key in keys.keys" :key="key.id" :value="key.id">
             {{ key.label }} ({{ key.key_type }})
           </option>
-        </select>
-      </div>
-      <div v-if="authType === 'password'" class="form-group">
-        <label>Password (stored in OS keychain)</label>
-        <input v-model="password" type="password" placeholder="Enter password" />
-      </div>
-      <div class="form-group">
-        <label>Startup command (optional)</label>
-        <input v-model="startupCommand" placeholder="e.g. docker ps" />
-      </div>
-      <div class="form-group">
-        <label>Tags (comma-separated)</label>
-        <input v-model="tags" placeholder="production, web" />
-      </div>
-      <div class="modal-actions">
-        <button class="btn secondary" @click="emit('close')">Cancel</button>
-        <button class="btn" @click="save">Save</button>
-      </div>
+        </Select>
+        <p v-if="!keys.keys.length" class="text-[11px] text-muted-foreground mt-1">
+          No keys available. Add one in the Keys section.
+        </p>
+      </FormGroup>
+
+      <FormGroup>
+        <Label for="host-group">Group (optional)</Label>
+        <Select id="host-group" v-model="form.groupId">
+          <option value="">No group</option>
+          <option v-for="group in hosts.groups" :key="group.id" :value="group.id">
+            {{ group.name }}
+          </option>
+        </Select>
+      </FormGroup>
+
+      <FormGroup>
+        <Label for="host-tags">Tags (comma-separated)</Label>
+        <Input id="host-tags" v-model="form.tags" placeholder="production, web" />
+      </FormGroup>
     </div>
-  </div>
+
+    <template #footer>
+      <Button variant="ghost" @click="emit('close')">Cancel</Button>
+      <Button :disabled="!isValid" @click="save">
+        {{ host ? "Save changes" : "Add host" }}
+      </Button>
+    </template>
+  </Dialog>
 </template>

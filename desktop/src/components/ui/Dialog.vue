@@ -1,0 +1,56 @@
+<script setup lang="ts">
+import { cn } from "../../lib/cn";
+import Overlay from "./Overlay.vue";
+
+const props = withDefaults(
+  defineProps<{
+    open: boolean;
+    title?: string;
+    description?: string;
+    width?: string;
+    class?: string;
+  }>(),
+  {
+    width: "480px",
+  },
+);
+
+const emit = defineEmits<{ close: [] }>();
+</script>
+
+<template>
+  <Teleport to="body">
+    <Overlay v-if="props.open" @close="emit('close')">
+      <div
+        :class="cn(
+          'fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2',
+          'z-50 w-full max-w-[92vw]',
+          'rounded-xl border border-border bg-popover text-popover-foreground shadow-dialog',
+          'animate-scale-in',
+          'flex flex-col',
+          props.class,
+        )"
+        :style="{ maxWidth: props.width }"
+        @click.stop
+      >
+        <div v-if="props.title || $slots.header" class="px-5 pt-5 pb-3">
+          <slot name="header">
+            <h2 class="text-[15px] font-semibold leading-tight">{{ props.title }}</h2>
+            <p v-if="props.description" class="mt-1 text-[13px] text-muted-foreground">
+              {{ props.description }}
+            </p>
+          </slot>
+        </div>
+        <div class="px-5 py-3 overflow-y-auto flex-1">
+          <slot />
+        </div>
+        <div
+          v-if="$slots.footer"
+          class="flex items-center justify-end gap-2 border-t border-border px-5 py-3"
+        >
+          <slot name="footer" />
+        </div>
+      </div>
+    </Overlay>
+  </Teleport>
+</template>

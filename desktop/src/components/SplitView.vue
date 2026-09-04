@@ -54,24 +54,16 @@ function close() {
 </script>
 
 <template>
-  <div v-if="isSplit(node)" class="split-container" :class="node.direction">
-    <div
-      class="split-child"
-      :style="node.direction === 'horizontal'
-        ? { flex: node.ratio }
-        : { flex: node.ratio }"
-    >
+  <div v-if="isSplit(node)" class="flex w-full h-full" :class="node.direction === 'horizontal' ? 'flex-row' : 'flex-col'">
+    <div class="flex-1 overflow-hidden min-w-[50px] min-h-[50px]" :style="{ flex: node.ratio }">
       <SplitView :node="node.first" :tab-id="tabId" />
     </div>
     <div
-      class="split-divider"
-      :class="node.direction"
+      class="flex-shrink-0 bg-border transition-colors duration-100 hover:bg-ring/50"
+      :class="node.direction === 'horizontal' ? 'w-px cursor-col-resize' : 'h-px cursor-row-resize'"
       @mousedown="startDrag"
     ></div>
-    <div
-      class="split-child"
-      :style="{ flex: 1 - node.ratio }"
-    >
+    <div class="flex-1 overflow-hidden min-w-[50px] min-h-[50px]" :style="{ flex: 1 - node.ratio }">
       <SplitView :node="node.second" :tab-id="tabId" />
     </div>
   </div>

@@ -1,112 +1,225 @@
 <script setup lang="ts">
 import { ref, onMounted } from "vue";
 import { useKeysStore } from "../stores/keys";
-import { useVaultStore } from "../stores/vault";
+import Button from "./ui/Button.vue";
+import Dialog from "./ui/Dialog.vue";
+import Input from "./ui/Input.vue";
+import Textarea from "./ui/Textarea.vue";
+import FormGroup from "./ui/FormGroup.vue";
+import Label from "./ui/Label.vue";
+import Badge from "./ui/Badge.vue";
+import {
+  KeyRound,
+  Plus,
+  Trash2,
+  Copy,
+  Check,
+  Eye,
+  EyeOff,
+} from "lucide-vue-next";
+import type { KeyMeta } from "../types";
 
 const keys = useKeysStore();
-const vault = useVaultStore();
 
-const showImport = ref(false);
-const importLabel = ref("");
-const importKey = ref("");
-const importPassphrase = ref("");
-const genLabel = ref("");
+const showAdd = ref(false);
+const showPublic = ref<string | null>(null);
+const copiedId = ref<string | null>(null);
+
+const addForm = ref({
+  label: "",
+  import: false,
+  privateKey: "",
+  passphrase: "",
+});
 
 onMounted(() => {
   keys.load();
 });
 
-async function generate() {
-  if (!genLabel.value.trim()) {
-    genLabel.value = `key-${Date.now()}`;
-  }
-  try {
-    await keys.generateKey(genLabel.value);
-    genLabel.value = "";
-  } catch (e) {
-    alert(`Failed to generate key: ${e}`);
+async function generateKey() {
+  if (!addForm.value.label.trim()) return;
+  await keys.generateKey(addForm.value.label);
+  resetForm();
+}
+
+async function importKey() {
+  if (!addForm.value.label.trim() || !addForm.value.privateKey.trim()) return;
+  await keys.importKey(
+    addForm.value.label,
+    addForm.value.privateKey,
+    addForm.value.passphrase || null,
+  );
+  resetForm();
+}
+
+function resetForm() {
+  showAdd.value = false;
+  addForm.value = { label: "", import: false, privateKey: "", passphrase: "" };
+}
+
+async function deleteKey(key: KeyMeta) {
+  if (confirm(`Delete key "${key.label}"?`)) {
+    await keys.deleteKey(key.id);
   }
 }
 
-async function doImport() {
-  if (!importKey.value.trim() || !importLabel.value.trim()) return;
+async function copyPublicKey(key: KeyMeta) {
   try {
-    await keys.importKey(
-      importLabel.value,
-      importKey.value,
-      importPassphrase.value || null,
-    );
-    showImport.value = false;
-    importLabel.value = "";
-    importKey.value = "";
-    importPassphrase.value = "";
+    await navigator.clipboard.writeText(key.public_key_base64);
+    copiedId.value = key.id;
+    setTimeout(() => (copiedId.value = null), 1500);
   } catch (e) {
-    alert(`Failed to import key: ${e}`);
-  }
-}
-
-async function deleteKey(keyId: string, label: string) {
-  if (confirm(`Delete key "${label}"? This cannot be undone.`)) {
-    try {
-      await keys.deleteKey(keyId);
-    } catch (e) {
-      alert(`Failed to delete key: ${e}`);
-    }
+    console.error(e);
   }
 }
 </script>
 
 <template>
-  <div style="padding: 16px; overflow-y: auto; height: 100%;">
-    <div style="display: flex; align-items: center; margin-bottom: 16px; gap: 12px;">
-      <h2 style="font-size: 16px;">SSH Keys</h2>
-      <div style="margin-left: auto; display: flex; gap: 8px;">
-        <input v-model="genLabel" placeholder="key label" class="search-input" style="width: 120px;" />
-        <button class="btn btn-sm" @click="generate">Generate Ed25519</button>
-        <button class="btn btn-sm secondary" @click="showImport = !showImport">Import</button>
+  <div class="flex flex-col h-full overflow-hidden">
+    <!-- Header -->
+    <div class="flex h-11 items-center gap-2 border-b border-border px-4">
+      <h2 class="text-[14px] font-semibold">SSH Keys</h2>
+      <div class="ml-auto">
+        <Button size="sm" @click="showAdd = true">
+          <Plus class="size-3.5" :stroke-width="1.75" />
+          Add Key
+        </Button>
       </div>
     </div>
 
-    <div v-if="!vault.unlocked" class="empty-state" style="padding: 40px;">
-      <p>Unlock the vault to manage keys</p>
-    </div>
+    <!-- Content -->
+    <div class="flex-1 overflow-y-auto p-3">
+      <div v-if="keys.keys.length" class="flex flex-col gap-1.5">
+        <div
+          v-for="key in keys.keys"
+          :key="key.id"
+          class="group flex items-center gap-3 rounded-md border border-border bg-card p-3 transition-colors duration-100 hover:border-muted-foreground/30"
+        >
+          <div class="flex h-9 w-9 items-center justify-center rounded-md bg-muted">
+            <KeyRound class="size-4 text-muted-foreground" :stroke-width="1.75" />
+          </div>
+          <div class="flex-1 min-w-0">
+            <div class="flex items-center gap-2">
+              <span class="text-[13px] font-medium truncate">{{ key.label }}</span>
+              <Badge>{{ key.key_type }}</Badge>
+            </div>
+            <div class="text-[11px] text-muted-foreground truncate font-mono mt-0.5">
+              {{ key.fingerprint }}
+            </div>
+          </div>
+          <div class="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+            <button
+              class="flex h-7 w-7 items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground transition-colors duration-100"
+              :aria-label="showPublic === key.id ? 'Hide public key' : 'Show public key'"
+              @click="showPublic = showPublic === key.id ? null : key.id"
+            >
+              <Eye v-if="showPublic !== key.id" class="size-3.5" :stroke-width="1.75" />
+              <EyeOff v-else class="size-3.5" :stroke-width="1.75" />
+            </button>
+            <button
+              class="flex h-7 w-7 items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground transition-colors duration-100"
+              aria-label="Copy public key"
+              @click="copyPublicKey(key)"
+            >
+              <Check v-if="copiedId === key.id" class="size-3.5 text-green-500" :stroke-width="1.75" />
+              <Copy v-else class="size-3.5" :stroke-width="1.75" />
+            </button>
+            <button
+              class="flex h-7 w-7 items-center justify-center rounded text-muted-foreground hover:bg-destructive/20 hover:text-destructive transition-colors duration-100"
+              aria-label="Delete key"
+              @click="deleteKey(key)"
+            >
+              <Trash2 class="size-3.5" :stroke-width="1.75" />
+            </button>
+          </div>
+        </div>
 
-    <div v-else-if="showImport" class="modal-overlay" @click.self="showImport = false">
-      <div class="modal">
-        <h2>Import Key</h2>
-        <div class="form-group">
-          <label>Label</label>
-          <input v-model="importLabel" placeholder="my-key" />
+        <!-- Public key viewer -->
+        <div
+          v-if="showPublic"
+          class="rounded-md border border-border bg-muted/50 p-3 mt-1"
+        >
+          <div class="text-[11px] text-muted-foreground mb-1.5">Public key</div>
+          <pre class="text-[11px] font-mono text-foreground whitespace-pre-wrap break-all">{{ keys.keys.find(k => k.id === showPublic)?.public_key_base64 || 'Unavailable' }}</pre>
         </div>
-        <div class="form-group">
-          <label>OpenSSH Private Key</label>
-          <textarea v-model="importKey" rows="10" placeholder="-----BEGIN OPENSSH PRIVATE KEY-----&#10;..." style="font-family: monospace; font-size: 11px;"></textarea>
+      </div>
+
+      <!-- Empty state -->
+      <div v-else class="flex flex-col items-center justify-center py-16 px-6 gap-3 text-center">
+        <KeyRound class="size-8 text-muted-foreground/50" :stroke-width="1.5" />
+        <div>
+          <p class="text-[14px] font-medium text-foreground">No SSH keys yet</p>
+          <p class="text-[12px] text-muted-foreground mt-1">Generate a new key or import an existing one</p>
         </div>
-        <div class="form-group">
-          <label>Key Passphrase (if encrypted)</label>
-          <input v-model="importPassphrase" type="password" placeholder="optional" />
-        </div>
-        <div class="modal-actions">
-          <button class="btn secondary" @click="showImport = false">Cancel</button>
-          <button class="btn" @click="doImport">Import</button>
-        </div>
+        <Button size="sm" @click="showAdd = true">
+          <Plus class="size-3.5" :stroke-width="1.75" />
+          Add Key
+        </Button>
       </div>
     </div>
 
-    <div v-else-if="keys.keys.length">
-      <div v-for="key in keys.keys" :key="key.id" class="key-item">
-        <span class="key-type-badge">{{ key.key_type }}</span>
-        <div class="key-info">
-          <div class="key-label">{{ key.label }}</div>
-          <div class="key-meta">{{ key.fingerprint.slice(0, 48) }}...</div>
+    <!-- Add key dialog -->
+    <Dialog
+      :open="showAdd"
+      :title="addForm.import ? 'Import Key' : 'Generate Key'"
+      description="Create or import an SSH key. Keys are encrypted at rest in the vault."
+      width="520px"
+      @close="showAdd = false"
+    >
+      <div class="flex flex-col gap-4">
+        <div class="flex gap-1 p-1 rounded-md bg-muted">
+          <button
+            class="flex-1 h-7 rounded text-[12px] font-medium transition-colors duration-100"
+            :class="!addForm.import ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground'"
+            @click="addForm.import = false"
+          >
+            Generate
+          </button>
+          <button
+            class="flex-1 h-7 rounded text-[12px] font-medium transition-colors duration-100"
+            :class="addForm.import ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground'"
+            @click="addForm.import = true"
+          >
+            Import
+          </button>
         </div>
-        <button class="icon-btn" @click="deleteKey(key.id, key.label)" title="Delete">🗑</button>
-      </div>
-    </div>
 
-    <div v-else class="empty-state" style="padding: 40px;">
-      <p>No keys yet</p>
-      <p style="font-size: 11px;">Generate or import a key to get started</p>
-    </div>
+        <FormGroup>
+          <Label for="key-label">Label</Label>
+          <Input id="key-label" v-model="addForm.label" placeholder="My laptop key" />
+        </FormGroup>
+
+        <template v-if="addForm.import">
+          <FormGroup>
+            <Label for="key-private">Private key (OpenSSH)</Label>
+            <Textarea
+              id="key-private"
+              v-model="addForm.privateKey"
+              :rows="6"
+              placeholder="-----BEGIN OPENSSH PRIVATE KEY-----..."
+              class="font-mono text-[11px]"
+            />
+          </FormGroup>
+          <FormGroup>
+            <Label for="key-passphrase">Passphrase (optional)</Label>
+            <Input id="key-passphrase" v-model="addForm.passphrase" type="password" placeholder="Leave empty if no passphrase" />
+          </FormGroup>
+        </template>
+
+        <p v-else class="text-[12px] text-muted-foreground">
+          A new Ed25519 key pair will be generated and stored encrypted in the vault.
+        </p>
+      </div>
+
+      <template #footer>
+        <Button variant="ghost" @click="showAdd = false">Cancel</Button>
+        <Button v-if="!addForm.import" :disabled="!addForm.label.trim()" @click="generateKey">
+          Generate Key
+        </Button>
+        <Button v-else :disabled="!addForm.label.trim() || !addForm.privateKey.trim()" @click="importKey">
+          Import Key
+        </Button>
+      </template>
+    </Dialog>
   </div>
 </template>
