@@ -2,6 +2,7 @@
 import { ref, onMounted, onUnmounted, computed, watch, nextTick } from "vue";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
+import { SearchAddon } from "@xterm/addon-search";
 import "@xterm/xterm/css/xterm.css";
 import { useTabsStore, type Pane, type DropPosition } from "../stores/tabs";
 import { useHostsStore } from "../stores/hosts";
@@ -19,6 +20,12 @@ import {
   Maximize2,
   Minimize2,
   RotateCw,
+  Search,
+  ChevronUp,
+  ChevronDown,
+  CaseSensitive,
+  Regex,
+  WholeWord,
 } from "lucide-vue-next";
 import type { UnlistenFn } from "@tauri-apps/api/event";
 
@@ -43,11 +50,19 @@ const containerRef = ref<HTMLElement | null>(null);
 const paneRef = ref<HTMLElement | null>(null);
 let term: Terminal | null = null;
 let fitAddon: FitAddon | null = null;
+let searchAddon: SearchAddon | null = null;
 let unlistenData: UnlistenFn | null = null;
 let unlistenClosed: UnlistenFn | null = null;
 let resizeObserver: ResizeObserver | null = null;
 let currentSessionId: string | null = null;
 let connectionAttempted = false;
+
+const showSearch = ref(false);
+const searchQuery = ref("");
+const searchCaseSensitive = ref(false);
+const searchRegex = ref(false);
+const searchWholeWord = ref(false);
+const searchInputRef = ref<HTMLInputElement | null>(null);
 
 const isActive = computed(() => tabs.activePaneId === props.pane.id);
 const isDragging = computed(() => tabs.draggedPaneId === props.pane.id);
@@ -56,7 +71,6 @@ const dragPosition = computed(() => tabs.dragOverPosition);
 const someoneDragging = computed(() => tabs.draggedPaneId !== null);
 const isFullscreen = computed(() => ui.fullscreenPaneId === props.pane.id);
 
-// Watch vault unlock state — retry connection if it was waiting for vault
 watch(
   () => vault.unlocked,
   async (unlocked) => {
@@ -66,7 +80,6 @@ watch(
   },
 );
 
-// Refit terminal when fullscreen state changes
 watch(isFullscreen, () => {
   nextTick(() => {
     if (fitAddon && term) {
@@ -82,7 +95,6 @@ watch(isFullscreen, () => {
   });
 });
 
-// Refit terminal when this pane's tab becomes active
 watch(
   () => tabs.activeTabId,
   (newActiveTabId) => {
@@ -122,6 +134,22 @@ onMounted(async () => {
 
   fitAddon = new FitAddon();
   term.loadAddon(fitAddon);
+  searchAddon = new SearchAddon();
+  term.loadAddon(searchAddon);
+
+  // Intercept Ctrl/Cmd+F before xterm can convert it to ^F and send it to the PTY.
+  term.attachCustomKeyEventHandler((event) => {
+    const isSearchShortcut =
+      (event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "f";
+    if (!isSearchShortcut) return true;
+
+    if (event.type === "keydown") {
+      event.preventDefault();
+      openSearch();
+    }
+    return false;
+  });
+
   term.open(containerRef.value);
   fitAddon.fit();
 
@@ -158,7 +186,7 @@ onMounted(async () => {
         if (currentSessionId) {
           api.sessionResize(currentSessionId, term.cols, term.rows);
         }
-      } catch (e) {
+      } catch {
         // Ignore resize errors during teardown
       }
     }
@@ -185,9 +213,7 @@ async function connectSession(sessionId: string) {
       await api.createLocalTerminal(sessionId, term.cols, term.rows);
       tabs.setPaneConnected(props.pane.id, sessionId);
     } catch (e) {
-      if (term) {
-        term.write(`\x1b[31mFailed to create local terminal: ${e}\x1b[0m\r\n`);
-      }
+      term?.write(`\x1b[31mFailed to create local terminal: ${e}\x1b[0m\r\n`);
     }
     return;
   }
@@ -199,7 +225,6 @@ async function connectSession(sessionId: string) {
     return;
   }
 
-  // Determine if this host needs the vault (publickey auth)
   const needsVault =
     host.auth === "publickey" ||
     (host.identity_id != null &&
@@ -207,7 +232,6 @@ async function connectSession(sessionId: string) {
         (i) => i.id === host.identity_id && i.auth === "publickey",
       ));
 
-  // If vault is needed but locked, prompt the user to unlock it
   if (needsVault && !vault.unlocked) {
     term?.write("\x1b[33mVault is locked — required for SSH key authentication.\x1b[0m\r\n");
     const success = await ui.requestVaultUnlock();
@@ -215,7 +239,6 @@ async function connectSession(sessionId: string) {
       term?.write("\x1b[31mConnection cancelled: vault remains locked.\x1b[0m\r\n");
       return;
     }
-    // vault is now unlocked — fall through to connect
   }
 
   const password = null;
@@ -225,7 +248,6 @@ async function connectSession(sessionId: string) {
   } catch (e) {
     const msg = String(e);
     if (msg.includes("vault passphrase required") || msg.includes("vault required")) {
-      // Vault wasn't actually unlocked — prompt and retry
       term?.write("\x1b[33mVault passphrase required. Please unlock the vault.\x1b[0m\r\n");
       const success = await ui.requestVaultUnlock();
       if (!success) {
@@ -244,27 +266,21 @@ async function connectSession(sessionId: string) {
   }
 }
 
-// Reconnect: close old session, clear terminal, create new session
 async function reconnect() {
   if (!term) return;
 
-  // Close the old session if it still exists
   if (currentSessionId) {
     api.closeSession(currentSessionId).catch(() => {});
   }
 
-  // Clear the terminal
   term.reset();
 
-  // Generate a new session ID and re-register event listeners
   const newSessionId = crypto.randomUUID();
   currentSessionId = newSessionId;
 
-  // Remove old listeners
   if (unlistenData) unlistenData();
   if (unlistenClosed) unlistenClosed();
 
-  // Register new listeners for the new session
   unlistenData = await api.onSessionData((event) => {
     if (event.session_id === newSessionId && term) {
       const data = new Uint8Array(event.data);
@@ -279,21 +295,73 @@ async function reconnect() {
     }
   });
 
-  // Re-wire data input to the new session
-  // (term.onData handler from onMounted still references the old sessionId
-  //  via closure, so we need a new approach — use a ref-like pattern)
   await connectSession(newSessionId);
 }
 
-// --- Focus handling ---
 function focusPane() {
   tabs.setActivePane(props.pane.id);
-  if (term) {
-    term.focus();
+  term?.focus();
+}
+
+function searchOptions() {
+  return {
+    caseSensitive: searchCaseSensitive.value,
+    regex: searchRegex.value,
+    wholeWord: searchWholeWord.value,
+    decorations: {
+      matchOverviewRuler: "#4f9cf9",
+      activeMatchColorOverviewRuler: "#f59e0b",
+      matchBackground: "#264f78",
+      activeMatchBackground: "#f59e0b80",
+    },
+  };
+}
+
+function openSearch() {
+  showSearch.value = true;
+  nextTick(() => {
+    searchInputRef.value?.focus();
+    searchInputRef.value?.select();
+  });
+}
+
+function closeSearch() {
+  showSearch.value = false;
+  searchQuery.value = "";
+  searchAddon?.clearDecorations();
+  term?.focus();
+}
+
+function doSearch(direction: "next" | "prev") {
+  if (!searchAddon || !searchQuery.value) return;
+  if (direction === "next") {
+    searchAddon.findNext(searchQuery.value, searchOptions());
+  } else {
+    searchAddon.findPrevious(searchQuery.value, searchOptions());
   }
 }
 
-// --- Drag and drop ---
+function onSearchInput() {
+  if (!searchAddon || !searchQuery.value) {
+    searchAddon?.clearDecorations();
+    return;
+  }
+  searchAddon.findNext(searchQuery.value, searchOptions());
+}
+
+function onSearchKeydown(e: KeyboardEvent) {
+  if (e.key === "Escape") {
+    e.preventDefault();
+    closeSearch();
+  } else if (e.key === "Enter") {
+    e.preventDefault();
+    doSearch(e.shiftKey ? "prev" : "next");
+  } else if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "g") {
+    e.preventDefault();
+    doSearch(e.shiftKey ? "prev" : "next");
+  }
+}
+
 function onDragStart(e: DragEvent) {
   tabs.startDrag(props.pane.id);
   if (e.dataTransfer) {
@@ -309,26 +377,21 @@ function onDragEnd() {
 function onDragOver(e: DragEvent) {
   if (!tabs.draggedPaneId || tabs.draggedPaneId === props.pane.id) return;
   e.preventDefault();
-  if (e.dataTransfer) {
-    e.dataTransfer.dropEffect = "move";
-  }
-
-  // Determine drop position based on mouse position within the pane
+  if (e.dataTransfer) e.dataTransfer.dropEffect = "move";
   if (!paneRef.value) return;
+
   const rect = paneRef.value.getBoundingClientRect();
   const x = (e.clientX - rect.left) / rect.width;
   const y = (e.clientY - rect.top) / rect.height;
-
-  // Center zone (swap) is a small area in the middle
   const centerSize = 0.2;
-  const isCenter = x > 0.5 - centerSize && x < 0.5 + centerSize &&
-                   y > 0.5 - centerSize && y < 0.5 + centerSize;
+  const isCenter =
+    x > 0.5 - centerSize && x < 0.5 + centerSize &&
+    y > 0.5 - centerSize && y < 0.5 + centerSize;
 
   let position: DropPosition;
   if (isCenter) {
     position = "center";
   } else {
-    // Determine which edge zone
     const distLeft = x;
     const distRight = 1 - x;
     const distTop = y;
@@ -339,12 +402,10 @@ function onDragOver(e: DragEvent) {
     else if (minDist === distTop) position = "top";
     else position = "bottom";
   }
-
   tabs.setDragOver(props.pane.id, position);
 }
 
 function onDragLeave(e: DragEvent) {
-  // Only clear if we're actually leaving the pane (not entering a child)
   if (!paneRef.value) return;
   const rect = paneRef.value.getBoundingClientRect();
   const x = e.clientX;
@@ -357,18 +418,18 @@ function onDragLeave(e: DragEvent) {
 function onDrop(e: DragEvent) {
   e.preventDefault();
   if (!tabs.draggedPaneId) return;
-
   if (!paneRef.value) {
     tabs.endDrag();
     return;
   }
+
   const rect = paneRef.value.getBoundingClientRect();
   const x = (e.clientX - rect.left) / rect.width;
   const y = (e.clientY - rect.top) / rect.height;
-
   const centerSize = 0.2;
-  const isCenter = x > 0.5 - centerSize && x < 0.5 + centerSize &&
-                   y > 0.5 - centerSize && y < 0.5 + centerSize;
+  const isCenter =
+    x > 0.5 - centerSize && x < 0.5 + centerSize &&
+    y > 0.5 - centerSize && y < 0.5 + centerSize;
 
   let position: DropPosition;
   if (isCenter) {
@@ -384,7 +445,6 @@ function onDrop(e: DragEvent) {
     else if (minDist === distTop) position = "top";
     else position = "bottom";
   }
-
   tabs.dropPane(props.pane.id, position);
 }
 </script>
@@ -403,7 +463,6 @@ function onDrop(e: DragEvent) {
     @dragleave="onDragLeave"
     @drop="onDrop"
   >
-    <!-- Pane header — draggable, compact -->
     <div
       class="flex h-6 items-center gap-1.5 px-2 bg-sidebar border-b border-sidebar-border flex-shrink-0 select-none"
       :class="{
@@ -416,27 +475,18 @@ function onDrop(e: DragEvent) {
       @dragend="onDragEnd"
       @click="focusPane"
     >
-      <GripVertical
-        class="size-3 text-muted-foreground/50 shrink-0"
-        :stroke-width="1.75"
-      />
+      <GripVertical class="size-3 text-muted-foreground/50 shrink-0" :stroke-width="1.75" />
       <CircleDot
         v-if="pane.connected"
         class="size-2.5 text-green-500 shrink-0"
         :stroke-width="0"
         fill="currentColor"
       />
-      <Circle
-        v-else
-        class="size-2.5 text-muted-foreground shrink-0"
-        :stroke-width="1.75"
-      />
+      <Circle v-else class="size-2.5 text-muted-foreground shrink-0" :stroke-width="1.75" />
       <span
         class="text-[11px] truncate flex-1"
         :class="isActive ? 'text-foreground font-medium' : 'text-muted-foreground'"
-      >
-        {{ pane.title }}
-      </span>
+      >{{ pane.title }}</span>
       <div class="flex items-center gap-0.5">
         <button
           v-if="!pane.connected && !isFullscreen"
@@ -446,6 +496,14 @@ function onDrop(e: DragEvent) {
           @click.stop="reconnect"
         >
           <RotateCw class="size-3" :stroke-width="1.75" />
+        </button>
+        <button
+          class="flex h-5 w-5 items-center justify-center rounded text-muted-foreground hover:bg-sidebar-accent hover:text-foreground transition-colors duration-100"
+          aria-label="Search in terminal"
+          title="Search (Cmd/Ctrl+F)"
+          @click.stop="openSearch"
+        >
+          <Search class="size-3" :stroke-width="1.75" />
         </button>
         <button
           class="flex h-5 w-5 items-center justify-center rounded text-muted-foreground hover:bg-sidebar-accent hover:text-foreground transition-colors duration-100"
@@ -485,10 +543,70 @@ function onDrop(e: DragEvent) {
       </div>
     </div>
 
-    <!-- Terminal body -->
     <div ref="containerRef" class="flex-1 overflow-hidden bg-black"></div>
 
-    <!-- Disconnected overlay with reconnect button -->
+    <div
+      v-if="showSearch"
+      class="absolute top-7 right-2 z-40 flex items-center gap-1 rounded-md border border-border bg-background shadow-lg p-1"
+      @click.stop
+    >
+      <input
+        ref="searchInputRef"
+        v-model="searchQuery"
+        type="text"
+        placeholder="Search..."
+        class="h-6 w-[160px] rounded bg-transparent px-2 text-[12px] text-foreground placeholder:text-muted-foreground outline-none border-none"
+        @input="onSearchInput"
+        @keydown="onSearchKeydown"
+      />
+      <button
+        class="flex h-6 w-6 items-center justify-center rounded transition-colors duration-100"
+        :class="searchCaseSensitive ? 'bg-primary/20 text-primary' : 'text-muted-foreground hover:bg-muted'"
+        :title="'Case sensitive' + (searchCaseSensitive ? ' (on)' : '')"
+        @click="searchCaseSensitive = !searchCaseSensitive; onSearchInput()"
+      >
+        <CaseSensitive class="size-3.5" :stroke-width="1.75" />
+      </button>
+      <button
+        class="flex h-6 w-6 items-center justify-center rounded transition-colors duration-100"
+        :class="searchWholeWord ? 'bg-primary/20 text-primary' : 'text-muted-foreground hover:bg-muted'"
+        :title="'Whole word' + (searchWholeWord ? ' (on)' : '')"
+        @click="searchWholeWord = !searchWholeWord; onSearchInput()"
+      >
+        <WholeWord class="size-3.5" :stroke-width="1.75" />
+      </button>
+      <button
+        class="flex h-6 w-6 items-center justify-center rounded transition-colors duration-100"
+        :class="searchRegex ? 'bg-primary/20 text-primary' : 'text-muted-foreground hover:bg-muted'"
+        :title="'Regex' + (searchRegex ? ' (on)' : '')"
+        @click="searchRegex = !searchRegex; onSearchInput()"
+      >
+        <Regex class="size-3.5" :stroke-width="1.75" />
+      </button>
+      <div class="w-px h-4 bg-border mx-0.5"></div>
+      <button
+        class="flex h-6 w-6 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground"
+        title="Previous match (Shift+Enter)"
+        @click="doSearch('prev')"
+      >
+        <ChevronUp class="size-3.5" :stroke-width="1.75" />
+      </button>
+      <button
+        class="flex h-6 w-6 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground"
+        title="Next match (Enter)"
+        @click="doSearch('next')"
+      >
+        <ChevronDown class="size-3.5" :stroke-width="1.75" />
+      </button>
+      <button
+        class="flex h-6 w-6 items-center justify-center rounded text-muted-foreground hover:bg-destructive/20 hover:text-destructive"
+        title="Close search (Esc)"
+        @click="closeSearch"
+      >
+        <X class="size-3.5" :stroke-width="1.75" />
+      </button>
+    </div>
+
     <div
       v-if="!pane.connected && connectionAttempted"
       class="absolute inset-0 top-6 z-10 flex items-center justify-center bg-black/60 pointer-events-auto"
@@ -506,12 +624,10 @@ function onDrop(e: DragEvent) {
       </div>
     </div>
 
-    <!-- Drop zone overlay (shown when dragging over this pane) -->
     <div
       v-if="isDragOver && someoneDragging && !isDragging"
       class="absolute inset-0 z-20 pointer-events-none"
     >
-      <!-- Top zone -->
       <div
         v-if="dragPosition === 'top'"
         class="absolute top-0 left-0 right-0 h-1/2 bg-primary/20 border-2 border-primary border-bottom-0 rounded-t-md flex items-center justify-center"
@@ -521,7 +637,6 @@ function onDrop(e: DragEvent) {
           Drop to split top
         </div>
       </div>
-      <!-- Bottom zone -->
       <div
         v-else-if="dragPosition === 'bottom'"
         class="absolute bottom-0 left-0 right-0 h-1/2 bg-primary/20 border-2 border-primary border-top-0 rounded-b-md flex items-center justify-center"
@@ -531,7 +646,6 @@ function onDrop(e: DragEvent) {
           Drop to split bottom
         </div>
       </div>
-      <!-- Left zone -->
       <div
         v-else-if="dragPosition === 'left'"
         class="absolute top-0 bottom-0 left-0 w-1/2 bg-primary/20 border-2 border-primary border-right-0 rounded-l-md flex items-center justify-center"
@@ -541,7 +655,6 @@ function onDrop(e: DragEvent) {
           Drop to split left
         </div>
       </div>
-      <!-- Right zone -->
       <div
         v-else-if="dragPosition === 'right'"
         class="absolute top-0 bottom-0 right-0 w-1/2 bg-primary/20 border-2 border-primary border-left-0 rounded-r-md flex items-center justify-center"
@@ -551,7 +664,6 @@ function onDrop(e: DragEvent) {
           Drop to split right
         </div>
       </div>
-      <!-- Center zone (swap) -->
       <div
         v-else-if="dragPosition === 'center'"
         class="absolute inset-0 bg-primary/15 border-2 border-dashed border-primary rounded-md flex items-center justify-center"
@@ -563,7 +675,6 @@ function onDrop(e: DragEvent) {
       </div>
     </div>
 
-    <!-- Dragging indicator (semi-transparent when being dragged) -->
     <div
       v-if="isDragging"
       class="absolute inset-0 z-30 bg-muted/50 pointer-events-none flex items-center justify-center"
