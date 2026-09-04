@@ -54,7 +54,7 @@ describe("identities store", () => {
         id: "temp",
         label: "New Identity",
         username: "deploy",
-        auth: "password",
+        auth: { password: { credential_key: "default" } },
         key_id: null,
         tags: [],
       };
