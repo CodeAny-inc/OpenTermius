@@ -9,6 +9,7 @@ import {
   Vault,
   Search,
   Plus,
+  UserCircle,
 } from "lucide-vue-next";
 import { cn } from "../lib/cn";
 import { useTabsStore } from "../stores/tabs";
@@ -26,6 +27,7 @@ const inputRef = ref<HTMLInputElement | null>(null);
 
 const baseCommands = [
   { id: "hosts", label: "Go to Hosts", icon: Server, group: "Navigation" },
+  { id: "identities", label: "Go to Identities", icon: UserCircle, group: "Navigation" },
   { id: "terminal", label: "Go to Terminal", icon: Terminal, group: "Navigation" },
   { id: "keys", label: "Go to Keys", icon: KeyRound, group: "Navigation" },
   { id: "workspaces", label: "Go to Workspaces", icon: FolderOpen, group: "Navigation" },

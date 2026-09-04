@@ -15,6 +15,7 @@ export interface Host {
   startup_command?: string | null;
   proxy_command?: string | null;
   jump_host_id?: Uuid | null;
+  identity_id?: Uuid | null;
 }
 
 export type AuthMethod =
@@ -26,6 +27,15 @@ export interface HostGroup {
   id: Uuid;
   name: string;
   color?: string | null;
+}
+
+export interface Identity {
+  id: Uuid;
+  label: string;
+  username: string;
+  auth: AuthMethod;
+  key_id?: Uuid | null;
+  tags: string[];
 }
 
 export interface KeyMeta {

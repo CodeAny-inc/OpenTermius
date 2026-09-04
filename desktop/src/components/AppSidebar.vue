@@ -10,6 +10,7 @@ import {
   Plus,
   Settings,
   CircleDot,
+  UserCircle,
 } from "lucide-vue-next";
 import { cn } from "../lib/cn";
 
@@ -26,6 +27,7 @@ const emit = defineEmits<{
 
 const navItems = [
   { id: "hosts", label: "Hosts", icon: Server },
+  { id: "identities", label: "Identities", icon: UserCircle },
   { id: "terminal", label: "Terminal", icon: Terminal },
   { id: "keys", label: "Keys", icon: KeyRound },
   { id: "workspaces", label: "Workspaces", icon: FolderOpen },

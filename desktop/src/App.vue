@@ -3,11 +3,13 @@ import { ref, onMounted, onUnmounted, computed } from "vue";
 import { useVaultStore } from "./stores/vault";
 import { useHostsStore } from "./stores/hosts";
 import { useKeysStore } from "./stores/keys";
+import { useIdentitiesStore } from "./stores/identities";
 import { useWorkspacesStore } from "./stores/workspaces";
 import { useTabsStore } from "./stores/tabs";
 import AppSidebar from "./components/AppSidebar.vue";
 import TerminalArea from "./components/TerminalArea.vue";
 import HostList from "./components/HostList.vue";
+import IdentityManager from "./components/IdentityManager.vue";
 import KeyManager from "./components/KeyManager.vue";
 import VaultView from "./components/VaultView.vue";
 import KnownHostsView from "./components/KnownHostsView.vue";
@@ -18,6 +20,7 @@ import UpdateBanner from "./components/UpdateBanner.vue";
 const vault = useVaultStore();
 const hosts = useHostsStore();
 const keys = useKeysStore();
+const identities = useIdentitiesStore();
 const workspaces = useWorkspacesStore();
 const tabs = useTabsStore();
 
@@ -48,6 +51,7 @@ onMounted(async () => {
   await vault.checkStatus();
   await hosts.load();
   await keys.load();
+  await identities.load();
   await workspaces.load();
 });
 
@@ -69,6 +73,7 @@ onUnmounted(() => {
     <main class="flex-1 flex flex-col overflow-hidden min-w-[480px]">
       <TerminalArea v-if="showMainContent" />
       <HostList v-else-if="activeView === 'hosts'" />
+      <IdentityManager v-else-if="activeView === 'identities'" />
       <KeyManager v-else-if="activeView === 'keys'" />
       <VaultView v-else-if="activeView === 'vault'" />
       <KnownHostsView v-else-if="activeView === 'known-hosts'" />

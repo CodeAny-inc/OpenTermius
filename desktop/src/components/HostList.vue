@@ -5,6 +5,9 @@ import { useTabsStore } from "../stores/tabs";
 import HostForm from "./HostForm.vue";
 import Button from "./ui/Button.vue";
 import Input from "./ui/Input.vue";
+import Dialog from "./ui/Dialog.vue";
+import FormGroup from "./ui/FormGroup.vue";
+import Label from "./ui/Label.vue";
 import {
   Plus,
   Search,
@@ -12,9 +15,9 @@ import {
   Pencil,
   Trash2,
   Folder,
+  FolderPlus,
   ChevronRight,
 } from "lucide-vue-next";
-import { cn } from "../lib/cn";
 import type { Host } from "../types";
 
 const hosts = useHostsStore();
@@ -22,6 +25,8 @@ const tabs = useTabsStore();
 
 const showForm = ref(false);
 const editingHost = ref<Host | null>(null);
+const showGroupForm = ref(false);
+const newGroupName = ref("");
 
 onMounted(() => {
   hosts.load();
@@ -50,6 +55,22 @@ async function deleteHost(host: Host) {
 function selectGroup(groupId: string | null) {
   hosts.selectedGroupId = groupId;
 }
+
+async function createGroup() {
+  if (!newGroupName.value.trim()) return;
+  await hosts.addGroup(newGroupName.value.trim());
+  newGroupName.value = "";
+  showGroupForm.value = false;
+}
+
+async function deleteGroup(groupId: string, name: string) {
+  if (confirm(`Delete group "${name}"? Hosts in this group will be ungrouped.`)) {
+    await hosts.deleteGroup(groupId);
+    if (hosts.selectedGroupId === groupId) {
+      hosts.selectedGroupId = null;
+    }
+  }
+}
 </script>
 
 <template>
@@ -58,6 +79,10 @@ function selectGroup(groupId: string | null) {
     <div class="flex h-11 items-center gap-2 border-b border-border px-4">
       <h2 class="text-[14px] font-semibold">Hosts</h2>
       <div class="ml-auto flex items-center gap-2">
+        <Button size="sm" variant="ghost" @click="showGroupForm = true">
+          <FolderPlus class="size-3.5" :stroke-width="1.75" />
+          New Group
+        </Button>
         <Button size="sm" @click="addHost">
           <Plus class="size-3.5" :stroke-width="1.75" />
           Add Host
@@ -79,8 +104,8 @@ function selectGroup(groupId: string | null) {
 
     <!-- Content area -->
     <div class="flex-1 overflow-y-auto">
-      <!-- Groups -->
-      <div v-if="hosts.groups.length" class="px-2 pt-2 pb-1">
+      <!-- Groups sidebar -->
+      <div class="px-2 pt-2 pb-1">
         <button
           class="flex h-8 w-full items-center gap-2 rounded-md px-2 text-[13px] transition-colors duration-100"
           :class="hosts.selectedGroupId === null ? 'bg-sidebar-accent text-sidebar-accent-foreground' : 'text-muted-foreground hover:bg-muted'"
@@ -88,18 +113,36 @@ function selectGroup(groupId: string | null) {
         >
           <Server class="size-3.5" :stroke-width="1.75" />
           <span>All hosts</span>
+          <span class="ml-auto text-[10px] text-muted-foreground">{{ hosts.hosts.length }}</span>
         </button>
-        <button
+        <div
           v-for="group in hosts.groups"
           :key="group.id"
-          class="flex h-8 w-full items-center gap-2 rounded-md px-2 text-[13px] transition-colors duration-100"
+          class="group flex h-8 w-full items-center gap-2 rounded-md px-2 text-[13px] transition-colors duration-100 cursor-pointer"
           :class="hosts.selectedGroupId === group.id ? 'bg-sidebar-accent text-sidebar-accent-foreground' : 'text-muted-foreground hover:bg-muted'"
           @click="selectGroup(group.id)"
         >
-          <Folder class="size-3.5" :stroke-width="1.75" />
-          <span class="truncate">{{ group.name }}</span>
+          <Folder class="size-3.5 shrink-0" :stroke-width="1.75" />
+          <span class="truncate flex-1">{{ group.name }}</span>
+          <span class="text-[10px] text-muted-foreground">{{ hosts.hosts.filter(h => h.group_id === group.id).length }}</span>
+          <button
+            class="flex h-5 w-5 items-center justify-center rounded text-muted-foreground hover:bg-destructive/20 hover:text-destructive transition-colors duration-100 opacity-0 group-hover:opacity-100"
+            aria-label="Delete group"
+            @click.stop="deleteGroup(group.id, group.name)"
+          >
+            <Trash2 class="size-3" :stroke-width="1.75" />
+          </button>
+        </div>
+        <button
+          class="flex h-7 w-full items-center gap-2 rounded-md px-2 text-[12px] text-muted-foreground/70 hover:text-muted-foreground transition-colors duration-100"
+          @click="showGroupForm = true"
+        >
+          <FolderPlus class="size-3" :stroke-width="1.75" />
+          <span>Add group...</span>
         </button>
       </div>
+
+      <div class="border-t border-border/50 mx-2 my-1"></div>
 
       <!-- Host list -->
       <div v-if="hosts.filteredHosts.length" class="px-2 pt-1">
@@ -151,5 +194,31 @@ function selectGroup(groupId: string | null) {
     </div>
 
     <HostForm v-if="showForm" :host="editingHost" @close="showForm = false" />
+
+    <!-- Group creation dialog -->
+    <Dialog
+      v-if="showGroupForm"
+      :open="true"
+      title="New Group"
+      description="Create a group to organize your hosts"
+      width="400px"
+      @close="showGroupForm = false"
+    >
+      <div class="flex flex-col gap-4">
+        <FormGroup>
+          <Label for="group-name">Group name</Label>
+          <Input
+            id="group-name"
+            v-model="newGroupName"
+            placeholder="Production, Staging, Databases..."
+            @keydown.enter="createGroup"
+          />
+        </FormGroup>
+      </div>
+      <template #footer>
+        <Button variant="ghost" @click="showGroupForm = false">Cancel</Button>
+        <Button :disabled="!newGroupName.trim()" @click="createGroup">Create group</Button>
+      </template>
+    </Dialog>
   </div>
 </template>

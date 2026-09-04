@@ -4,6 +4,7 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type {
   Host,
   HostGroup,
+  Identity,
   KeyMeta,
   KnownHostEntry,
   Workspace,
@@ -21,6 +22,15 @@ export const deleteHost = (id: string) => invoke<void>("delete_host", { id });
 export const listGroups = () => invoke<HostGroup[]>("list_groups");
 export const addGroup = (name: string) => invoke<HostGroup>("add_group", { name });
 export const deleteGroup = (id: string) => invoke<void>("delete_group", { id });
+
+// --- identities ---
+export const listIdentities = () => invoke<Identity[]>("list_identities");
+export const addIdentity = (identity: Identity) =>
+  invoke<Identity>("add_identity", { identity });
+export const updateIdentity = (identity: Identity) =>
+  invoke<Identity>("update_identity", { identity });
+export const deleteIdentity = (id: string) =>
+  invoke<void>("delete_identity", { id });
 
 // --- vault ---
 export const vaultIsInitialized = () => invoke<boolean>("vault_is_initialized");
