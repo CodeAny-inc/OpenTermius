@@ -506,7 +506,7 @@ function swapPanesInTree(
 }
 
 // Collect all panes in depth-first order
-function collectPanes(tree: PaneTree): Pane[] {
+export function collectPanes(tree: PaneTree): Pane[] {
   if (isPane(tree)) return [tree];
   return [...collectPanes(tree.first), ...collectPanes(tree.second)];
 }

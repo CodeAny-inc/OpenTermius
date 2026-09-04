@@ -27,6 +27,10 @@ import {
 } from "lucide-vue-next";
 import type { Host } from "../types";
 
+const emit = defineEmits<{
+  "switch-view": [view: string];
+}>();
+
 const hosts = useHostsStore();
 const tabs = useTabsStore();
 const identities = useIdentitiesStore();
@@ -84,6 +88,8 @@ function confirmConnect() {
   showConnectDialog.value = false;
   connectTarget.value = null;
   tabs.newTab(host);
+  // Auto-redirect to terminal view
+  emit("switch-view", "terminal");
 }
 
 function cancelConnect() {

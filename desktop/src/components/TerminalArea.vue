@@ -1,11 +1,13 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted } from "vue";
 import { useTabsStore } from "../stores/tabs";
+import { useUiStore } from "../stores/ui";
 import { Plus, X, GripHorizontal } from "lucide-vue-next";
 import { cn } from "../lib/cn";
 import SplitView from "./SplitView.vue";
 
 const tabs = useTabsStore();
+const ui = useUiStore();
 
 // Tab drag state
 const draggedTabId = ref<string | null>(null);
@@ -91,8 +93,8 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <!-- Tab bar -->
-  <div class="flex h-11 items-center gap-0.5 border-b border-border bg-sidebar px-1.5 overflow-x-auto">
+  <!-- Tab bar (hidden when a pane is fullscreen) -->
+  <div v-show="!ui.fullscreenPaneId" class="flex h-11 items-center gap-0.5 border-b border-border bg-sidebar px-1.5 overflow-x-auto">
     <div
       v-for="tab in tabs.tabs"
       :key="tab.id"

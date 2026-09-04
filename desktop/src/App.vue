@@ -6,6 +6,7 @@ import { useKeysStore } from "./stores/keys";
 import { useIdentitiesStore } from "./stores/identities";
 import { useWorkspacesStore } from "./stores/workspaces";
 import { useTabsStore } from "./stores/tabs";
+import { useUiStore } from "./stores/ui";
 import AppSidebar from "./components/AppSidebar.vue";
 import TerminalArea from "./components/TerminalArea.vue";
 import HostList from "./components/HostList.vue";
@@ -17,6 +18,7 @@ import WorkspaceView from "./components/WorkspaceView.vue";
 import SettingsView from "./components/SettingsView.vue";
 import CommandPalette from "./components/CommandPalette.vue";
 import UpdateBanner from "./components/UpdateBanner.vue";
+import VaultUnlockModal from "./components/VaultUnlockModal.vue";
 
 const vault = useVaultStore();
 const hosts = useHostsStore();
@@ -24,6 +26,7 @@ const keys = useKeysStore();
 const identities = useIdentitiesStore();
 const workspaces = useWorkspacesStore();
 const tabs = useTabsStore();
+const ui = useUiStore();
 
 const activeView = ref("hosts");
 const commandPaletteOpen = ref(false);
@@ -31,6 +34,12 @@ const commandPaletteOpen = ref(false);
 const showMainContent = computed(() => activeView.value === "terminal");
 
 function handleKeydown(e: KeyboardEvent) {
+  // Exit fullscreen on Escape
+  if (e.key === "Escape" && ui.fullscreenPaneId) {
+    e.preventDefault();
+    ui.exitFullscreen();
+    return;
+  }
   const cmd = e.metaKey || e.ctrlKey;
   if (cmd && e.key === "k") {
     e.preventDefault();
@@ -72,8 +81,9 @@ onUnmounted(() => {
     />
 
     <main class="flex-1 flex flex-col overflow-hidden min-w-[480px]">
-      <TerminalArea v-if="showMainContent" />
-      <HostList v-else-if="activeView === 'hosts'" />
+      <!-- TerminalArea uses v-show to preserve state across view switches -->
+      <TerminalArea v-show="showMainContent" />
+      <HostList v-if="activeView === 'hosts'" @switch-view="activeView = $event" />
       <IdentityManager v-else-if="activeView === 'identities'" />
       <KeyManager v-else-if="activeView === 'keys'" />
       <VaultView v-else-if="activeView === 'vault'" />
@@ -87,5 +97,6 @@ onUnmounted(() => {
       @navigate="activeView = $event; commandPaletteOpen = false"
     />
     <UpdateBanner />
+    <VaultUnlockModal />
   </div>
 </template>

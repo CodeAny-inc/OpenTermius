@@ -1,10 +1,13 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, computed } from "vue";
+import { ref, onMounted, onUnmounted, computed, watch, nextTick } from "vue";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import "@xterm/xterm/css/xterm.css";
 import { useTabsStore, type Pane, type DropPosition } from "../stores/tabs";
 import { useHostsStore } from "../stores/hosts";
+import { useIdentitiesStore } from "../stores/identities";
+import { useVaultStore } from "../stores/vault";
+import { useUiStore } from "../stores/ui";
 import * as api from "../api";
 import {
   SplitSquareHorizontal,
@@ -14,6 +17,7 @@ import {
   CircleDot,
   GripVertical,
   Maximize2,
+  Minimize2,
 } from "lucide-vue-next";
 import type { UnlistenFn } from "@tauri-apps/api/event";
 
@@ -30,6 +34,9 @@ const emit = defineEmits<{
 
 const tabs = useTabsStore();
 const hosts = useHostsStore();
+const identities = useIdentitiesStore();
+const vault = useVaultStore();
+const ui = useUiStore();
 
 const containerRef = ref<HTMLElement | null>(null);
 const paneRef = ref<HTMLElement | null>(null);
@@ -39,12 +46,40 @@ let unlistenData: UnlistenFn | null = null;
 let unlistenClosed: UnlistenFn | null = null;
 let resizeObserver: ResizeObserver | null = null;
 let currentSessionId: string | null = null;
+let connectionAttempted = false;
 
 const isActive = computed(() => tabs.activePaneId === props.pane.id);
 const isDragging = computed(() => tabs.draggedPaneId === props.pane.id);
 const isDragOver = computed(() => tabs.dragOverPaneId === props.pane.id);
 const dragPosition = computed(() => tabs.dragOverPosition);
 const someoneDragging = computed(() => tabs.draggedPaneId !== null);
+const isFullscreen = computed(() => ui.fullscreenPaneId === props.pane.id);
+
+// Watch vault unlock state — retry connection if it was waiting for vault
+watch(
+  () => vault.unlocked,
+  async (unlocked) => {
+    if (unlocked && currentSessionId && !props.pane.connected && connectionAttempted) {
+      await connectSession(currentSessionId);
+    }
+  },
+);
+
+// Refit terminal when fullscreen state changes
+watch(isFullscreen, () => {
+  nextTick(() => {
+    if (fitAddon && term) {
+      try {
+        fitAddon.fit();
+        if (currentSessionId) {
+          api.sessionResize(currentSessionId, term.cols, term.rows);
+        }
+      } catch {
+        // ignore
+      }
+    }
+  });
+});
 
 onMounted(async () => {
   if (!containerRef.value) return;
@@ -119,6 +154,7 @@ onUnmounted(() => {
 
 async function connectSession(sessionId: string) {
   if (!term || !fitAddon) return;
+  connectionAttempted = true;
 
   if (props.pane.terminalType === "local") {
     try {
@@ -129,17 +165,56 @@ async function connectSession(sessionId: string) {
         term.write(`\x1b[31mFailed to create local terminal: ${e}\x1b[0m\r\n`);
       }
     }
-  } else if (props.pane.hostId) {
-    const host = hosts.hosts.find((h) => h.id === props.pane.hostId);
-    if (!host) {
-      term?.write("Host not found\r\n");
+    return;
+  }
+
+  if (!props.pane.hostId) return;
+  const host = hosts.hosts.find((h) => h.id === props.pane.hostId);
+  if (!host) {
+    term?.write("Host not found\r\n");
+    return;
+  }
+
+  // Determine if this host needs the vault (publickey auth)
+  const needsVault =
+    host.auth === "publickey" ||
+    (host.identity_id != null &&
+      identities.identities.some(
+        (i) => i.id === host.identity_id && i.auth === "publickey",
+      ));
+
+  // If vault is needed but locked, prompt the user to unlock it
+  if (needsVault && !vault.unlocked) {
+    term?.write("\x1b[33mVault is locked — required for SSH key authentication.\x1b[0m\r\n");
+    const success = await ui.requestVaultUnlock();
+    if (!success) {
+      term?.write("\x1b[31mConnection cancelled: vault remains locked.\x1b[0m\r\n");
       return;
     }
-    try {
-      const password = null;
-      await api.connectSsh(sessionId, host, password, term.cols, term.rows);
-      tabs.setPaneConnected(props.pane.id, sessionId);
-    } catch (e) {
+    // vault is now unlocked — fall through to connect
+  }
+
+  const password = null;
+  try {
+    await api.connectSsh(sessionId, host, password, term.cols, term.rows);
+    tabs.setPaneConnected(props.pane.id, sessionId);
+  } catch (e) {
+    const msg = String(e);
+    if (msg.includes("vault passphrase required") || msg.includes("vault required")) {
+      // Vault wasn't actually unlocked — prompt and retry
+      term?.write("\x1b[33mVault passphrase required. Please unlock the vault.\x1b[0m\r\n");
+      const success = await ui.requestVaultUnlock();
+      if (!success) {
+        term?.write("\x1b[31mConnection cancelled.\x1b[0m\r\n");
+        return;
+      }
+      try {
+        await api.connectSsh(sessionId, host, password, term.cols, term.rows);
+        tabs.setPaneConnected(props.pane.id, sessionId);
+      } catch (e2) {
+        term?.write(`\x1b[31mConnection failed: ${e2}\x1b[0m\r\n`);
+      }
+    } else {
       term?.write(`\x1b[31mConnection failed: ${e}\x1b[0m\r\n`);
     }
   }
@@ -254,8 +329,9 @@ function onDrop(e: DragEvent) {
     ref="paneRef"
     class="flex flex-col w-full h-full relative transition-all duration-100"
     :class="{
-      'ring-1 ring-inset ring-primary/40': isActive && !isDragOver,
-      'ring-2 ring-inset ring-primary': isActive && isDragOver,
+      'ring-1 ring-inset ring-primary/40': isActive && !isDragOver && !isFullscreen,
+      'ring-2 ring-inset ring-primary': isActive && isDragOver && !isFullscreen,
+      'fixed inset-0 z-[90]': isFullscreen,
     }"
     @click="focusPane"
     @dragover="onDragOver"
@@ -299,6 +375,16 @@ function onDrop(e: DragEvent) {
       <div class="flex items-center gap-0.5">
         <button
           class="flex h-5 w-5 items-center justify-center rounded text-muted-foreground hover:bg-sidebar-accent hover:text-foreground transition-colors duration-100"
+          :aria-label="isFullscreen ? 'Exit fullscreen' : 'Fullscreen'"
+          :title="isFullscreen ? 'Exit fullscreen (Esc)' : 'Fullscreen'"
+          @click.stop="ui.toggleFullscreen(props.pane.id)"
+        >
+          <Minimize2 v-if="isFullscreen" class="size-3" :stroke-width="1.75" />
+          <Maximize2 v-else class="size-3" :stroke-width="1.75" />
+        </button>
+        <button
+          v-if="!isFullscreen"
+          class="flex h-5 w-5 items-center justify-center rounded text-muted-foreground hover:bg-sidebar-accent hover:text-foreground transition-colors duration-100"
           aria-label="Split horizontally"
           title="Split horizontally"
           @click.stop="emit('split-h')"
@@ -306,6 +392,7 @@ function onDrop(e: DragEvent) {
           <SplitSquareHorizontal class="size-3" :stroke-width="1.75" />
         </button>
         <button
+          v-if="!isFullscreen"
           class="flex h-5 w-5 items-center justify-center rounded text-muted-foreground hover:bg-sidebar-accent hover:text-foreground transition-colors duration-100"
           aria-label="Split vertically"
           title="Split vertically"
