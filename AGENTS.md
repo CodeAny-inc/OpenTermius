@@ -36,6 +36,25 @@
 - `TAURI_SIGNING_PRIVATE_KEY` — the base64 private key (from `tauri signer generate`)
 - `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` — empty string if key has no password
 
+## macOS code signing
+- The app is currently ad-hoc signed (`signingIdentity: "-"` in tauri.conf.json).
+- Without an Apple Developer ID certificate, macOS shows "damaged app" when
+  downloaded from the internet. Users fix with: `xattr -cr /Applications/OpenTermius.app`
+- To enable proper signing + notarization, set these env vars before building:
+  - `APPLE_SIGNING_IDENTITY` — Developer ID Application certificate name
+  - `APPLE_ID` — Apple ID email
+  - `APPLE_PASSWORD` — app-specific password (from appleid.apple.com)
+  - `APPLE_TEAM_ID` — Developer Team ID
+- Or use an API key:
+  - `APPLE_API_KEY` — App Store Connect API key
+  - `APPLE_API_ISSUER` — Issuer ID
+  - `APPLE_API_KEY_PATH` — path to API key file
+
+## Git author config
+- All commits must be authored by `computerbox124 <computerbox124@users.noreply.github.com>`.
+- Local git config is set via `git config user.name` and `git config user.email`.
+- NEVER attribute commits to Devin or any AI agent.
+
 ## Conventions
 - All SSH/crypto logic lives in `core/`, never in shells.
 - Private key material must be wrapped to `Zeroize` on drop.
