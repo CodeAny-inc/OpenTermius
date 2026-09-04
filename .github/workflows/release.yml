@@ -276,20 +276,20 @@ jobs:
           else:
               print(f"WARNING: darwin-x86_64 missing (sig={bool(sig)}, url={url})")
 
-          # Linux x86_64 — with createUpdaterArtifacts, the updater
-          # artifact is .AppImage.tar.gz (not the raw .AppImage)
-          sig = find_sig("*amd64.AppImage.tar.gz.sig")
-          url = find_asset_url("*amd64.AppImage.tar.gz")
+          # Linux x86_64 — AppImage signed directly
+          # e.g. OpenTermius_0.1.1-alpha.23_amd64.AppImage
+          sig = find_sig("*amd64.AppImage.sig")
+          url = find_asset_url("*amd64.AppImage")
           if sig and url:
               platforms["linux-x86_64"] = {"signature": sig, "url": url}
               print(f"linux-x86_64: {url}")
           else:
               print(f"WARNING: linux-x86_64 missing (sig={bool(sig)}, url={url})")
 
-          # Windows x86_64 — with createUpdaterArtifacts, the updater
-          # artifact is .nsis.zip (not the raw .exe)
-          sig = find_sig("*x64-setup.exe.nsis.zip.sig")
-          url = find_asset_url("*x64-setup.exe.nsis.zip")
+          # Windows x86_64 — NSIS setup exe signed directly
+          # e.g. OpenTermius_0.1.1-alpha.23_x64-setup.exe
+          sig = find_sig("*x64-setup.exe.sig")
+          url = find_asset_url("*x64-setup.exe")
           if sig and url:
               platforms["windows-x86_64"] = {"signature": sig, "url": url}
               print(f"windows-x86_64: {url}")
