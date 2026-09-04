@@ -26,8 +26,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-      - name: Cargo build (macOS)
+      - name: Cargo build (macOS shipping defaults)
         run: cargo build --workspace
+      - name: Cargo build (macOS biometric implementation)
+        run: cargo build -p opentermius-desktop --features macos-biometric
 
   frontend-build:
     runs-on: ubuntu-latest
