@@ -2,6 +2,7 @@
 import { ref, onMounted, computed } from "vue";
 import * as api from "../api";
 import { useUpdateStore } from "../stores/update";
+import { useSettingsStore } from "../stores/settings";
 import Button from "./ui/Button.vue";
 import Badge from "./ui/Badge.vue";
 import {
@@ -15,10 +16,23 @@ import {
   Github,
   ExternalLink,
   Info,
+  Shield,
+  Lock,
+  Clock,
 } from "lucide-vue-next";
 
 const update = useUpdateStore();
+const settings = useSettingsStore();
 const appInfo = ref<api.AppInfo | null>(null);
+
+const autoLockOptions = [
+  { value: 0, label: "Never" },
+  { value: 5, label: "5 minutes" },
+  { value: 10, label: "10 minutes" },
+  { value: 15, label: "15 minutes" },
+  { value: 30, label: "30 minutes" },
+  { value: 60, label: "1 hour" },
+];
 
 const updateAvailable = computed(() => update.available);
 
@@ -38,7 +52,6 @@ onMounted(async () => {
   } catch (e) {
     console.error("Failed to get app info:", e);
   }
-  // Refresh update status if not recently checked
   if (!update.lastChecked) {
     await update.check();
   }
@@ -63,17 +76,13 @@ function openReleases() {
 
 <template>
   <div class="flex flex-col h-full overflow-hidden">
-    <!-- Header -->
     <div class="flex h-11 items-center gap-2 border-b border-border px-4 pl-12 md:pl-4">
       <SettingsIcon class="size-4 text-muted-foreground" :stroke-width="1.75" />
       <h2 class="text-[14px] font-semibold">Settings</h2>
     </div>
 
-    <!-- Content -->
     <div class="flex-1 overflow-y-auto p-4 sm:p-6">
       <div class="max-w-[640px] mx-auto flex flex-col gap-4 sm:gap-6">
-
-        <!-- About section -->
         <section class="rounded-lg border border-border bg-card p-4 sm:p-5">
           <h3 class="text-[14px] font-semibold mb-4 flex items-center gap-2">
             <Info class="size-4 text-muted-foreground" :stroke-width="1.75" />
@@ -111,16 +120,66 @@ function openReleases() {
           </div>
         </section>
 
-        <!-- Updates section -->
+        <section class="rounded-lg border border-border bg-card p-4 sm:p-5">
+          <h3 class="text-[14px] font-semibold mb-4 flex items-center gap-2">
+            <Shield class="size-4 text-muted-foreground" :stroke-width="1.75" />
+            Security
+          </h3>
+
+          <div class="flex items-center gap-3 mb-4">
+            <div class="flex h-9 w-9 items-center justify-center rounded-md bg-muted shrink-0">
+              <Clock class="size-4 text-muted-foreground" :stroke-width="1.75" />
+            </div>
+            <div class="flex-1 min-w-0">
+              <div class="text-[13px] font-medium">Auto-lock after inactivity</div>
+              <div class="text-[11px] text-muted-foreground mt-0.5">
+                Locks the vault after a period of no user activity. Live terminal sessions keep running.
+              </div>
+            </div>
+            <select
+              class="h-8 rounded-md border border-border bg-background px-2 text-[12px] text-foreground outline-none cursor-pointer hover:border-muted-foreground/50 transition-colors duration-100"
+              :value="settings.autoLockMinutes"
+              @change="settings.setAutoLockMinutes(Number(($event.target as HTMLSelectElement).value))"
+            >
+              <option v-for="option in autoLockOptions" :key="option.value" :value="option.value">
+                {{ option.label }}
+              </option>
+            </select>
+          </div>
+
+          <div class="flex items-center gap-3 pt-4 border-t border-border">
+            <div class="flex h-9 w-9 items-center justify-center rounded-md bg-muted shrink-0">
+              <Lock class="size-4 text-muted-foreground" :stroke-width="1.75" />
+            </div>
+            <div class="flex-1 min-w-0">
+              <div class="text-[13px] font-medium">Lock on suspend / extended background</div>
+              <div class="text-[11px] text-muted-foreground mt-0.5">
+                Locks the vault after a detected suspend/resume gap or an extended period in the background.
+              </div>
+            </div>
+            <button
+              type="button"
+              role="switch"
+              :aria-checked="settings.lockOnSleep"
+              class="flex h-6 w-11 items-center rounded-full transition-colors duration-100 shrink-0"
+              :class="settings.lockOnSleep ? 'bg-primary' : 'bg-muted'"
+              @click="settings.setLockOnSleep(!settings.lockOnSleep)"
+            >
+              <span
+                class="h-4 w-4 rounded-full bg-white transition-transform duration-100"
+                :class="settings.lockOnSleep ? 'translate-x-6' : 'translate-x-1'"
+              />
+            </button>
+          </div>
+        </section>
+
         <section class="rounded-lg border border-border bg-card p-4 sm:p-5">
           <h3 class="text-[14px] font-semibold mb-4 flex items-center gap-2">
             <ArrowUpCircle class="size-4 text-muted-foreground" :stroke-width="1.75" />
             Updates
           </h3>
 
-          <!-- Status row -->
           <div class="flex items-start sm:items-center gap-3 mb-4 flex-wrap">
-            <!-- Status icon -->
             <div class="flex h-9 w-9 items-center justify-center rounded-md shrink-0"
               :class="{
                 'bg-green-500/10': update.info && !update.info.available && !update.error,
@@ -157,7 +216,6 @@ function openReleases() {
               </div>
             </div>
 
-            <!-- Check Now button -->
             <Button
               size="sm"
               variant="outline"
@@ -169,9 +227,7 @@ function openReleases() {
             </Button>
           </div>
 
-          <!-- Update details + install -->
           <div v-if="updateAvailable" class="border-t border-border pt-4">
-            <!-- Release notes -->
             <div v-if="update.body" class="mb-4">
               <div class="text-[11px] font-medium text-muted-foreground uppercase tracking-wide mb-1.5">
                 Release Notes
@@ -181,7 +237,6 @@ function openReleases() {
               </div>
             </div>
 
-            <!-- Download progress -->
             <div v-if="update.installing" class="mb-4">
               <div class="h-1.5 w-full rounded-full bg-muted overflow-hidden">
                 <div
@@ -195,7 +250,6 @@ function openReleases() {
               </div>
             </div>
 
-            <!-- Install button -->
             <div v-else class="flex flex-wrap items-center gap-2">
               <Button size="sm" @click="update.install()">
                 <Download class="size-3.5 mr-1" :stroke-width="1.75" />
@@ -208,7 +262,6 @@ function openReleases() {
             </div>
           </div>
 
-          <!-- Error retry -->
           <div v-if="update.error && !update.installing" class="border-t border-border pt-4">
             <Button size="sm" variant="outline" @click="update.check()">
               <RefreshCw class="size-3.5 mr-1" :stroke-width="1.75" />
@@ -217,7 +270,6 @@ function openReleases() {
           </div>
         </section>
 
-        <!-- Auto-update info -->
         <section class="rounded-lg border border-border bg-muted/30 p-4">
           <div class="flex items-start gap-3">
             <Info class="size-4 text-muted-foreground shrink-0 mt-0.5" :stroke-width="1.75" />
@@ -225,18 +277,16 @@ function openReleases() {
               <p class="font-medium text-foreground mb-1">Automatic Updates</p>
               <p>
                 OpenTermius automatically checks for updates on startup.
-                When a new version is available, a notification banner appears
-                in the bottom-right corner. You can also manually check for
-                updates here at any time.
+                When a new version is available, the update dialog can notify you.
+                You can also manually check for updates here at any time.
               </p>
               <p class="mt-2">
-                Updates are downloaded, signature-verified, and installed
-                automatically. The app restarts to apply the update.
+                Updates are downloaded, signature-verified, and installed automatically.
+                The app restarts to apply the update.
               </p>
             </div>
           </div>
         </section>
-
       </div>
     </div>
   </div>
