@@ -5,28 +5,68 @@ on:
     tags:
       - "v*.*.*"
   workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to release (e.g. 0.1.2-alpha.1)"
+        required: false
 
 permissions:
   contents: write
 
 jobs:
+  # ──────────────────────────────────────────────
+  # Determine version and release type
+  # ──────────────────────────────────────────────
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.meta.outputs.version }}
+      tag: ${{ steps.meta.outputs.tag }}
+      is_prerelease: ${{ steps.meta.outputs.is_prerelease }}
+    steps:
+      - id: meta
+        run: |
+          if [[ -n "${{ inputs.version }}" ]]; then
+            VERSION="${{ inputs.version }}"
+            TAG="v${VERSION}"
+          else
+            TAG="${GITHUB_REF##*/}"
+            VERSION="${TAG#v}"
+          fi
+          IS_PRERELEASE="false"
+          if [[ "$VERSION" == *alpha* ]] || [[ "$VERSION" == *beta* ]] || [[ "$VERSION" == *rc* ]]; then
+            IS_PRERELEASE="true"
+          fi
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
+          echo "is_prerelease=$IS_PRERELEASE" >> $GITHUB_OUTPUT
+          echo "Releasing $TAG (prerelease=$IS_PRERELEASE)"
+
+  # ──────────────────────────────────────────────
+  # Build on all platforms
+  # ──────────────────────────────────────────────
   build:
+    needs: prepare
     strategy:
       fail-fast: false
       matrix:
         include:
           - platform: macos-latest
-            args: "--target aarch64-apple-darwin"
             target: aarch64-apple-darwin
+            args: "--target aarch64-apple-darwin"
+            rust_target: aarch64-apple-darwin
           - platform: macos-latest
-            args: "--target x86_64-apple-darwin"
             target: x86_64-apple-darwin
+            args: "--target x86_64-apple-darwin"
+            rust_target: x86_64-apple-darwin
           - platform: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
             args: ""
-            target: ""
+            rust_target: ""
           - platform: windows-latest
+            target: x86_64-pc-windows-msvc
             args: ""
-            target: ""
+            rust_target: ""
 
     runs-on: ${{ matrix.platform }}
     steps:
@@ -41,7 +81,7 @@ jobs:
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: ${{ matrix.target }}
+          targets: ${{ matrix.rust_target }}
 
       - name: Install Linux dependencies
         if: matrix.platform == 'ubuntu-22.04'
@@ -61,15 +101,18 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
-          tagName: ${{ github.ref_name }}
-          releaseName: "OpenTermius ${{ github.ref_name }}"
-          releaseBody: "See the assets below to download and install this version."
-          releaseDraft: true
-          prerelease: false
+          tagName: ${{ needs.prepare.outputs.tag }}
+          releaseName: "OpenTermius ${{ needs.prepare.outputs.tag }}"
+          releaseBody: "OpenTermius ${{ needs.prepare.outputs.version }} — see assets below."
+          releaseDraft: false
+          prerelease: ${{ needs.prepare.outputs.is_prerelease }}
           args: ${{ matrix.args }}
 
+  # ──────────────────────────────────────────────
+  # Generate and upload latest.json (update manifest)
+  # ──────────────────────────────────────────────
   publish-manifest:
-    needs: build
+    needs: [prepare, build]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -81,77 +124,116 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          TAG="${GITHUB_REF##*/}"
+          TAG="${{ needs.prepare.outputs.tag }}"
+          VERSION="${{ needs.prepare.outputs.version }}"
           gh release download "$TAG" --dir ./assets --clobber
+          echo "Downloaded assets:"
           ls -la ./assets
 
       - name: Generate latest.json
         env:
-          TAG: ${{ github.ref_name }}
+          TAG: ${{ needs.prepare.outputs.tag }}
+          VERSION: ${{ needs.prepare.outputs.version }}
+          REPO: ${{ github.repository }}
         run: |
-          VERSION="${TAG#v}"
-          # Collect platform-specific update entries from the .sig files
+          # Collect signatures and URLs for each platform
           # Tauri generates <artifact>.sig alongside each bundle
-          # Build the latest.json manifest referencing the GitHub release assets
-          
-          # macOS arm64
-          MACOS_ARM64_URL="https://github.com/${{ github.repository }}/releases/download/${TAG}/OpenTermius_${VERSION}_aarch64.app.tar.gz"
+
+          # macOS aarch64
+          MACOS_ARM64_URL="https://github.com/${REPO}/releases/download/${TAG}/OpenTermius_${VERSION}_aarch64.app.tar.gz"
           MACOS_ARM64_SIG=""
           if [ -f "./assets/OpenTermius_${VERSION}_aarch64.app.tar.gz.sig" ]; then
             MACOS_ARM64_SIG=$(cat "./assets/OpenTermius_${VERSION}_aarch64.app.tar.gz.sig")
           fi
-          
+
           # macOS x86_64
-          MACOS_X64_URL="https://github.com/${{ github.repository }}/releases/download/${TAG}/OpenTermius_${VERSION}_x64.app.tar.gz"
+          MACOS_X64_URL="https://github.com/${REPO}/releases/download/${TAG}/OpenTermius_${VERSION}_x64.app.tar.gz"
           MACOS_X64_SIG=""
           if [ -f "./assets/OpenTermius_${VERSION}_x64.app.tar.gz.sig" ]; then
             MACOS_X64_SIG=$(cat "./assets/OpenTermius_${VERSION}_x64.app.tar.gz.sig")
           fi
-          
-          # Linux
-          LINUX_URL="https://github.com/${{ github.repository }}/releases/download/${TAG}/opentermius-desktop_${VERSION}_amd64.AppImage"
+
+          # Linux x86_64 (AppImage)
+          LINUX_URL="https://github.com/${REPO}/releases/download/${TAG}/opentermius-desktop_${VERSION}_amd64.AppImage"
           LINUX_SIG=""
           if [ -f "./assets/opentermius-desktop_${VERSION}_amd64.AppImage.sig" ]; then
             LINUX_SIG=$(cat "./assets/opentermius-desktop_${VERSION}_amd64.AppImage.sig")
           fi
-          
-          # Windows
-          WINDOWS_URL="https://github.com/${{ github.repository }}/releases/download/${TAG}/OpenTermius_${VERSION}_x64-setup.exe"
+
+          # Windows x86_64 (NSIS setup exe)
+          WINDOWS_URL="https://github.com/${REPO}/releases/download/${TAG}/OpenTermius_${VERSION}_x64-setup.exe"
           WINDOWS_SIG=""
           if [ -f "./assets/OpenTermius_${VERSION}_x64-setup.exe.sig" ]; then
             WINDOWS_SIG=$(cat "./assets/OpenTermius_${VERSION}_x64-setup.exe.sig")
           fi
-          
-          cat > latest.json << EOF
-          {
-            "version": "${VERSION}",
-            "notes": "OpenTermius ${VERSION}",
-            "pub_date": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
-            "platforms": {
-              "darwin-aarch64": {
-                "signature": "${MACOS_ARM64_SIG}",
-                "url": "${MACOS_ARM64_URL}"
-              },
-              "darwin-x86_64": {
-                "signature": "${MACOS_X64_SIG}",
-                "url": "${MACOS_X64_URL}"
-              },
-              "linux-x86_64": {
-                "signature": "${LINUX_SIG}",
-                "url": "${LINUX_URL}"
-              },
-              "windows-x86_64": {
-                "signature": "${WINDOWS_SIG}",
-                "url": "${WINDOWS_URL}"
+
+          # Build the manifest with Python for proper JSON escaping
+          python3 << 'PYEOF'
+          import json, os
+
+          version = os.environ["VERSION"]
+          tag = os.environ["TAG"]
+          repo = os.environ["REPO"]
+
+          def read_sig(path):
+              try:
+                  with open(path) as f:
+                      return f.read().strip()
+              except FileNotFoundError:
+                  return ""
+
+          platforms = {}
+
+          # macOS aarch64
+          sig = read_sig(f"./assets/OpenTermius_{version}_aarch64.app.tar.gz.sig")
+          if sig:
+              platforms["darwin-aarch64"] = {
+                  "signature": sig,
+                  "url": f"https://github.com/{repo}/releases/download/{tag}/OpenTermius_{version}_aarch64.app.tar.gz"
               }
-            }
+
+          # macOS x86_64
+          sig = read_sig(f"./assets/OpenTermius_{version}_x64.app.tar.gz.sig")
+          if sig:
+              platforms["darwin-x86_64"] = {
+                  "signature": sig,
+                  "url": f"https://github.com/{repo}/releases/download/{tag}/OpenTermius_{version}_x64.app.tar.gz"
+              }
+
+          # Linux x86_64
+          sig = read_sig(f"./assets/opentermius-desktop_{version}_amd64.AppImage.sig")
+          if sig:
+              platforms["linux-x86_64"] = {
+                  "signature": sig,
+                  "url": f"https://github.com/{repo}/releases/download/{tag}/opentermius-desktop_{version}_amd64.AppImage"
+              }
+
+          # Windows x86_64
+          sig = read_sig(f"./assets/OpenTermius_{version}_x64-setup.exe.sig")
+          if sig:
+              platforms["windows-x86_64"] = {
+                  "signature": sig,
+                  "url": f"https://github.com/{repo}/releases/download/{tag}/OpenTermius_{version}_x64-setup.exe"
+              }
+
+          manifest = {
+              "version": version,
+              "notes": f"OpenTermius {version}",
+              "pub_date": __import__("datetime").datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"),
+              "platforms": platforms
           }
-          EOF
-          cat latest.json
+
+          with open("latest.json", "w") as f:
+              json.dump(manifest, f, indent=2)
+
+          print("Generated latest.json:")
+          print(json.dumps(manifest, indent=2))
+          PYEOF
 
       - name: Upload latest.json to release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          TAG="${GITHUB_REF##*/}"
+          TAG="${{ needs.prepare.outputs.tag }}"
           gh release upload "$TAG" latest.json --clobber
+          echo "Uploaded latest.json to $TAG"

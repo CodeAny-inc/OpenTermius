@@ -20,7 +20,53 @@
   - Push a tag `v0.1.0` → triggers `.github/workflows/release.yml`
   - Builds on macOS (arm64 + x86_64), Linux, Windows runners
   - Signs update packages with `TAURI_SIGNING_PRIVATE_KEY` secret
-  - Publishes artifacts + `latest.json` to GitHub Releases (draft)
+  - Publishes artifacts + `latest.json` to GitHub Releases
+  - Automatically detects prereleases (alpha/beta/rc in version)
+
+## Release automation
+
+### Local release script: `scripts/release.sh`
+Automates the entire local release process for macOS (current platform):
+```bash
+# Release next alpha (bumps version, builds, signs, uploads)
+./scripts/release.sh alpha
+
+# Release a specific version
+./scripts/release.sh 0.2.0
+
+# Release current version with custom notes
+./scripts/release.sh --notes "Fixed critical bug"
+
+# Dry run (see what would happen without executing)
+./scripts/release.sh --dry-run alpha
+
+# Skip checks (faster, use with caution)
+./scripts/release.sh --skip-checks alpha
+```
+The script: checks prerequisites → bumps version → runs checks → builds →
+creates DMG + tarball → signs tarball → generates latest.json → commits,
+tags, pushes → creates GitHub release with all assets.
+
+### Version management: `scripts/version.sh`
+```bash
+./scripts/version.sh              # print current version
+./scripts/version.sh 0.1.2        # set to 0.1.2
+./scripts/version.sh patch        # 0.1.1 -> 0.1.2
+./scripts/version.sh minor        # 0.1.1 -> 0.2.0
+./scripts/version.sh major        # 0.1.1 -> 1.0.0
+./scripts/version.sh alpha        # 0.1.1-alpha.9 -> 0.1.1-alpha.10
+./scripts/version.sh beta         # 0.1.1 -> 0.1.1-beta.1
+./scripts/version.sh stable       # 0.1.1-alpha.9 -> 0.1.1
+```
+Updates version in Cargo.toml, package.json, and tauri.conf.json.
+
+### GitHub Actions: `.github/workflows/release.yml`
+Triggers on tag push (`v*.*.*`) or manual dispatch.
+- Builds on macOS (arm64 + x86_64), Linux, Windows in parallel
+- Signs all bundles with `TAURI_SIGNING_PRIVATE_KEY`
+- Auto-detects prerelease (alpha/beta/rc in version string)
+- Generates `latest.json` with all platform signatures
+- Uploads everything to the GitHub release
 
 ## Auto-update
 - Uses `tauri-plugin-updater` (configured in `tauri.conf.json` under `plugins.updater`)
