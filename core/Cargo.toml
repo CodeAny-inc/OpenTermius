@@ -1,0 +1,30 @@
+[package]
+name = "opentermius-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Shared core for OpenTermius: SSH connections, key management, secure storage"
+
+[lib]
+name = "opentermius_core"
+crate-type = ["lib", "staticlib", "cdylib"]
+
+[dependencies]
+russh = { workspace = true }
+russh-keys = { workspace = true }
+russh-cryptovec = "0.7"
+ssh-key = "0.6"
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+zeroize = { workspace = true }
+argon2 = { workspace = true }
+aes-gcm = { workspace = true }
+uuid = { workspace = true }
+chrono = { workspace = true }
+base64 = "0.22"
+rand = "0.8"
+async-trait = "0.1"

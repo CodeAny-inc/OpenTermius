@@ -1,0 +1,76 @@
+# OpenTermius — Architecture
+
+## Principle: one core, many shells
+
+```
+                ┌─────────────────────────────────────────┐
+                │           opentermius-core (Rust)        │
+                │  connection · keys · vault · known_hosts │
+                └──────────┬──────────────┬───────────────┘
+                           │              │
+            FFI (in-proc)  │              │ FFI (uniffi/cbindgen)
+                           │              │
+              ┌────────────▼─────┐   ┌────▼──────────────────────┐
+              │  Tauri desktop   │   │  iOS / Android / iPadOS   │
+              │  (Linux/Win/Mac) │   │  native UI over core      │
+              └──────────────────┘   └───────────────────────────┘
+```
+
+The core never depends on a UI toolkit, a filesystem layout owned by a
+specific shell, or a process-spawning capability (so it works inside the
+iOS sandbox). All platform-specific concerns (where the vault file lives,
+how the passphrase is retrieved from the OS keychain) are injected by the
+shell.
+
+## Layers
+
+### core (`opentermius-core`)
+
+- `host` — pure data model. No secrets in serialized form.
+- `keys` — parse / generate OpenSSH keys via `russh-keys`. In-memory private
+  material is wrapped in `PrivateKeyMaterial` which `Zeroize`s on drop.
+- `vault` — Argon2id(passphrase, salt) -> AES-256-GCM. The only thing
+  written to disk is ciphertext + salt + public metadata.
+- `known_hosts` — TOFU. `verify()` records on first sight, compares
+  thereafter, returns `HostKeyMismatch` on divergence. `replace()` is the
+  only way to overwrite, and is called only after user confirmation.
+- `connection` — `russh` async client. Auth resolved from `AuthMethod` +
+  vault + (optional) password. The returned `Handle` is owned by the shell,
+  which streams channel data to the UI.
+
+### desktop (`desktop/src-tauri`)
+
+- `state` — owns `Vault`, `KnownHosts`, and the in-memory `passphrase`
+  (`Zeroizing<String>`, cleared on lock).
+- `commands` — Tauri `#[command]`s: `list_hosts`, `add_host`, `list_keys`,
+  `generate_key`, `import_key`, `initialize_vault`, `connect_ssh`.
+- Frontend (`desktop/src`) — minimal HTML/JS now; upgrade to a real
+  framework (React/Svelte/Solid) once the command surface is stable.
+
+### mobile (planned)
+
+- Core compiled per target (`staticlib`/`cdylib`).
+- iOS: `xcframework` + Swift bindings (uniffi or cbindgen).
+- Android: per-ABI `.so` + Kotlin bindings (uniffi or jnigen).
+- OS keychain/keystore for the passphrase; same vault file format.
+
+## Threat model & mitigations
+
+| Threat                         | Mitigation                                        |
+|--------------------------------|---------------------------------------------------|
+| Stolen laptop / disk read      | Vault is AES-256-GCM; KDF is Argon2id (64MiB)     |
+| Passphrase leak                | Stored in OS keychain, never in core config       |
+| MITM host key swap             | TOFU + hard fail on mismatch, explicit replace    |
+| Memory scrape after lock       | `Zeroize` on drop for keys & passphrase           |
+| Supply-chain (deps)            | Pinned versions, minimal surface, audit russh     |
+| XSS in renderer                | Strict CSP in `tauri.conf.json`; no remote code   |
+| Logging secrets                | No tracing of payloads/passphrases; redact keys   |
+
+## Open design questions (to resolve before MVP)
+
+1. Terminal emulation: xterm.js in the renderer, with PTY allocation in the
+   Rust backend (portable-pty). Channel data flows via Tauri events.
+2. Sync between devices: out of scope for MVP; later via end-to-end
+   encrypted sync (vault is already a ciphertext blob — sync is trivial).
+3. SFTP / port forwarding: russh supports both; wire as separate commands.
+4. Agent forwarding: supported by russh; gate behind an explicit toggle.
