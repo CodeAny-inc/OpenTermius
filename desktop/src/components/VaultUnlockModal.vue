@@ -6,14 +6,14 @@ import Button from "./ui/Button.vue";
 import Input from "./ui/Input.vue";
 import FormGroup from "./ui/FormGroup.vue";
 import Label from "./ui/Label.vue";
-import { Vault, Unlock, AlertCircle, Loader2 } from "lucide-vue-next";
+import { Vault, Unlock, Fingerprint, AlertCircle, Loader2 } from "lucide-vue-next";
 
 const vault = useVaultStore();
 const ui = useUiStore();
 
 const passphrase = ref("");
 const error = ref("");
-const loading = ref(false);
+const loading = ref<"password" | "biometric" | null>(null);
 const inputRef = ref<HTMLInputElement | null>(null);
 
 watch(
@@ -22,15 +22,16 @@ watch(
     if (open) {
       passphrase.value = "";
       error.value = "";
+      loading.value = null;
       nextTick(() => inputRef.value?.focus());
     }
   },
 );
 
 async function submit() {
-  if (!passphrase.value) return;
+  if (!passphrase.value || loading.value !== null) return;
   error.value = "";
-  loading.value = true;
+  loading.value = "password";
   try {
     await vault.unlock(passphrase.value);
     passphrase.value = "";
@@ -38,11 +39,29 @@ async function submit() {
   } catch (e) {
     error.value = String(e);
   } finally {
-    loading.value = false;
+    loading.value = null;
+  }
+}
+
+async function submitBiometric() {
+  if (loading.value !== null) return;
+  error.value = "";
+  loading.value = "biometric";
+  try {
+    await vault.unlockWithBiometric();
+    ui.resolveVaultUnlock(true);
+  } catch (e) {
+    error.value = String(e);
+    nextTick(() => inputRef.value?.focus());
+  } finally {
+    loading.value = null;
   }
 }
 
 function cancel() {
+  // Do not resolve the caller as cancelled while a Touch ID request is still
+  // capable of completing and unlocking the backend state.
+  if (loading.value !== null) return;
   passphrase.value = "";
   error.value = "";
   ui.resolveVaultUnlock(false);
@@ -69,6 +88,29 @@ function cancel() {
           </div>
         </div>
 
+        <template v-if="vault.biometricAvailable && vault.biometricEnabled">
+          <Button
+            class="w-full"
+            variant="outline"
+            :disabled="loading !== null"
+            @click="submitBiometric"
+          >
+            <Loader2
+              v-if="loading === 'biometric'"
+              class="size-3.5 mr-1 animate-spin"
+              :stroke-width="1.75"
+            />
+            <Fingerprint v-else class="size-3.5 mr-1" :stroke-width="1.75" />
+            {{ loading === "biometric" ? "Waiting for Touch ID..." : "Unlock with Touch ID" }}
+          </Button>
+
+          <div class="flex items-center gap-2 my-4 text-[11px] text-muted-foreground">
+            <div class="flex-1 h-px bg-border"></div>
+            <span>or use passphrase</span>
+            <div class="flex-1 h-px bg-border"></div>
+          </div>
+        </template>
+
         <FormGroup>
           <Label for="modal-pass">Master passphrase</Label>
           <Input
@@ -77,6 +119,7 @@ function cancel() {
             v-model="passphrase"
             type="password"
             placeholder="Enter master passphrase"
+            :disabled="loading !== null"
             @keydown.enter="submit"
             @keydown.escape="cancel"
           />
@@ -88,9 +131,15 @@ function cancel() {
         </p>
 
         <div class="flex justify-end gap-2 mt-4">
-          <Button variant="ghost" size="sm" @click="cancel">Cancel</Button>
-          <Button size="sm" :disabled="loading || !passphrase" @click="submit">
-            <Loader2 v-if="loading" class="size-3.5 mr-1 animate-spin" :stroke-width="1.75" />
+          <Button variant="ghost" size="sm" :disabled="loading !== null" @click="cancel">
+            Cancel
+          </Button>
+          <Button size="sm" :disabled="loading !== null || !passphrase" @click="submit">
+            <Loader2
+              v-if="loading === 'password'"
+              class="size-3.5 mr-1 animate-spin"
+              :stroke-width="1.75"
+            />
             <Unlock v-else class="size-3.5 mr-1" :stroke-width="1.75" />
             Unlock
           </Button>
