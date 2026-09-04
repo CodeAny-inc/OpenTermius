@@ -106,14 +106,18 @@ fn main() {
 async fn check_for_updates_silent(app: tauri::AppHandle) {
     match commands::check_with_prerelease_endpoint(&app).await {
         Ok(Some(update)) => {
+            let current = app.package_info().version.to_string();
             tracing::info!(
                 "update available: v{} (current: {})",
                 update.version,
-                app.package_info().version
+                current
             );
-            // Emit event so the frontend can show an update banner
+            // Emit event so the frontend can show an update banner.
+            // Include ALL fields the frontend UpdateInfo type expects.
             let _ = app.emit("update-available", serde_json::json!({
+                "available": true,
                 "version": update.version,
+                "current_version": current,
                 "date": update.date.map(|d| d.to_string()),
                 "body": update.body,
             }));

@@ -16,6 +16,8 @@ import KnownHostsView from "./components/KnownHostsView.vue";
 import WorkspaceView from "./components/WorkspaceView.vue";
 import CommandPalette from "./components/CommandPalette.vue";
 import UpdateBanner from "./components/UpdateBanner.vue";
+import * as api from "./api";
+import type { UpdateInfo } from "./api";
 
 const vault = useVaultStore();
 const hosts = useHostsStore();
@@ -26,8 +28,13 @@ const tabs = useTabsStore();
 
 const activeView = ref("hosts");
 const commandPaletteOpen = ref(false);
+const manualUpdateInfo = ref<api.UpdateInfo | null>(null);
 
 const showMainContent = computed(() => activeView.value === "terminal");
+
+function onSidebarUpdate(info: api.UpdateInfo) {
+  manualUpdateInfo.value = info;
+}
 
 function handleKeydown(e: KeyboardEvent) {
   const cmd = e.metaKey || e.ctrlKey;
@@ -68,6 +75,7 @@ onUnmounted(() => {
       :tab-count="tabs.tabs.length"
       @navigate="activeView = $event"
       @open-command-palette="commandPaletteOpen = true"
+      @update-available="onSidebarUpdate"
     />
 
     <main class="flex-1 flex flex-col overflow-hidden min-w-[480px]">
@@ -84,6 +92,6 @@ onUnmounted(() => {
       @close="commandPaletteOpen = false"
       @navigate="activeView = $event; commandPaletteOpen = false"
     />
-    <UpdateBanner />
+    <UpdateBanner :manual-update-info="manualUpdateInfo" />
   </div>
 </template>

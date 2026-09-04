@@ -709,7 +709,22 @@ pub async fn check_with_prerelease_endpoint(
         .build()
         .map_err(|e| e.to_string())?;
 
-    updater.check().await.map_err(|e| e.to_string())
+    let current_version = app.package_info().version.clone();
+    tracing::info!("updater: current version = {current_version}");
+
+    let result = updater.check().await;
+    match &result {
+        Ok(Some(update)) => {
+            tracing::info!("updater: update available v{}", update.version);
+        }
+        Ok(None) => {
+            tracing::info!("updater: no update available (current: {current_version})");
+        }
+        Err(e) => {
+            tracing::warn!("updater: check failed: {e}");
+        }
+    }
+    result.map_err(|e| e.to_string())
 }
 
 /// Check for updates. Returns update info if an update is available.
@@ -721,6 +736,7 @@ pub async fn check_with_prerelease_endpoint(
 pub async fn check_for_updates(
     app: AppHandle,
 ) -> ApiResult<UpdateInfo> {
+    tracing::info!("check_for_updates command invoked");
     let current = app.package_info().version.to_string();
 
     match check_with_prerelease_endpoint(&app).await {

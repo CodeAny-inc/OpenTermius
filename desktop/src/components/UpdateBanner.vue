@@ -1,8 +1,12 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted } from "vue";
+import { ref, onMounted, onUnmounted, watch } from "vue";
 import * as api from "../api";
-import { Download, X, Loader2, Check } from "lucide-vue-next";
+import { Download, X, Loader2 } from "lucide-vue-next";
 import type { UnlistenFn } from "@tauri-apps/api/event";
+
+const props = defineProps<{
+  manualUpdateInfo?: api.UpdateInfo | null;
+}>();
 
 const show = ref(false);
 const updateInfo = ref<api.UpdateInfo | null>(null);
@@ -16,24 +20,9 @@ let unlistenProgress: UnlistenFn | null = null;
 let unlistenExtracting: UnlistenFn | null = null;
 
 onMounted(async () => {
-  unlistenAvailable = await api.onUpdateAvailable((info) => {
-    updateInfo.value = info;
-    if (!dismissed.value) show.value = true;
-  });
-
-  unlistenProgress = await api.onUpdateProgress((e) => {
-    if (e.content_length && e.content_length > 0) {
-      progress.value = Math.min(100, (e.chunk_length / e.content_length) * 100);
-    }
-  });
-
-  unlistenExtracting = await api.onUpdateExtracting(() => {
-    extracting.value = true;
-  });
-
-  // Also explicitly check for updates after mount — the backend's
-  // startup check may emit the event before this listener is registered
-  // (race condition), so we do our own check here as well.
+  // Check for updates FIRST, before registering event listeners.
+  // If listen() calls throw, they would prevent checkForUpdates()
+  // from running. So we do the explicit check first.
   try {
     const info = await api.checkForUpdates();
     if (info.available && !dismissed.value) {
@@ -41,7 +30,36 @@ onMounted(async () => {
       show.value = true;
     }
   } catch (e) {
-    console.error("Update check failed:", e);
+    console.error("[UpdateBanner] checkForUpdates failed:", e);
+  }
+
+  // Register event listeners AFTER the explicit check.
+  // Wrap each in try/catch so one failing doesn't block the others.
+  try {
+    unlistenAvailable = await api.onUpdateAvailable((info) => {
+      updateInfo.value = info;
+      if (!dismissed.value) show.value = true;
+    });
+  } catch (e) {
+    console.error("[UpdateBanner] listen update-available failed:", e);
+  }
+
+  try {
+    unlistenProgress = await api.onUpdateProgress((e) => {
+      if (e.content_length && e.content_length > 0) {
+        progress.value = Math.min(100, (e.chunk_length / e.content_length) * 100);
+      }
+    });
+  } catch (e) {
+    console.error("[UpdateBanner] listen update-progress failed:", e);
+  }
+
+  try {
+    unlistenExtracting = await api.onUpdateExtracting(() => {
+      extracting.value = true;
+    });
+  } catch (e) {
+    console.error("[UpdateBanner] listen update-extracting failed:", e);
   }
 });
 
@@ -49,6 +67,15 @@ onUnmounted(() => {
   unlistenAvailable?.();
   unlistenProgress?.();
   unlistenExtracting?.();
+});
+
+// Watch for manual update checks from the sidebar
+watch(() => props.manualUpdateInfo, (info) => {
+  if (info && info.available) {
+    updateInfo.value = info;
+    dismissed.value = false;
+    show.value = true;
+  }
 });
 
 function dismiss() {
@@ -64,6 +91,7 @@ async function install() {
     // App will restart — this code may not execute
   } catch (e) {
     console.error("Update failed:", e);
+    alert(`Update failed: ${e}`);
     installing.value = false;
   }
 }
@@ -78,7 +106,7 @@ async function install() {
   >
     <div
       v-if="show && updateInfo"
-      class="absolute bottom-4 right-4 z-40 w-[360px] rounded-lg border border-border bg-popover text-popover-foreground shadow-dialog"
+      class="fixed bottom-4 right-4 z-[100] w-[360px] rounded-lg border border-border bg-popover text-popover-foreground shadow-dialog"
     >
       <div class="flex items-start gap-3 p-3.5">
         <div class="flex h-8 w-8 items-center justify-center rounded-md bg-primary/10 shrink-0">
