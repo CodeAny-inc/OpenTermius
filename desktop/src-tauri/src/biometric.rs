@@ -45,6 +45,13 @@ mod macos {
         static kSecUseAuthenticationUIFail: CFStringRef;
     }
 
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    enum PassphraseState {
+        Stored,
+        Missing,
+        Invalidated,
+    }
+
     fn password_options() -> PasswordOptions {
         let mut options = PasswordOptions::new_generic_password(SERVICE, ACCOUNT);
         // On macOS, SecItem defaults to the legacy file-based keychain. Access
@@ -65,11 +72,25 @@ mod macos {
         }
     }
 
-    /// Check whether the protected passphrase exists without displaying an
-    /// authentication prompt. `errSecInteractionNotAllowed` means an item did
-    /// match but its access control requires interaction, which is exactly the
-    /// expected result for a Touch ID-protected credential in a no-UI query.
-    pub fn passphrase_stored() -> Result<bool, String> {
+    fn classify_passphrase_status(status: OSStatus) -> Result<PassphraseState, String> {
+        match status {
+            errSecSuccess | ERR_SEC_INTERACTION_NOT_ALLOWED => Ok(PassphraseState::Stored),
+            errSecItemNotFound => Ok(PassphraseState::Missing),
+            // An item protected with BIOMETRY_CURRENT_SET can become invalid
+            // after fingerprints are added or removed. Treat that expected
+            // lifecycle state as replaceable rather than making re-enrollment
+            // impossible; the command caller has already verified the master
+            // passphrase before store_passphrase() is reached.
+            errSecAuthFailed => Ok(PassphraseState::Invalidated),
+            code => Err(format_keychain_error(Error::from_code(code))),
+        }
+    }
+
+    /// Probe the protected credential without displaying authentication UI.
+    /// A valid biometric item requires interaction and therefore reports as
+    /// `Stored`; an item invalidated by enrollment changes is distinguished so
+    /// callers can safely offer explicit re-enrollment with the master password.
+    fn passphrase_state() -> Result<PassphraseState, String> {
         let mut options = password_options();
 
         #[allow(deprecated)]
@@ -87,11 +108,14 @@ mod macos {
         let status: OSStatus =
             unsafe { SecItemCopyMatching(params.as_concrete_TypeRef(), &mut ret) };
 
-        match status {
-            errSecSuccess | ERR_SEC_INTERACTION_NOT_ALLOWED => Ok(true),
-            errSecItemNotFound => Ok(false),
-            code => Err(format_keychain_error(Error::from_code(code))),
-        }
+        classify_passphrase_status(status)
+    }
+
+    /// Check whether a currently usable protected passphrase exists without
+    /// displaying an authentication prompt. An item invalidated by Touch ID
+    /// enrollment changes is reported as not stored so the UI can re-enable it.
+    pub fn passphrase_stored() -> Result<bool, String> {
+        Ok(matches!(passphrase_state()?, PassphraseState::Stored))
     }
 
     /// Store the passphrase in the Data Protection Keychain with biometric
@@ -100,23 +124,21 @@ mod macos {
     /// removing fingerprints invalidates the stored passphrase and requires
     /// the user to re-enable biometric unlock with the master passphrase.
     pub fn store_passphrase(passphrase: &str) -> Result<(), String> {
-        // Never destroy a credential that the no-UI probe says is still usable.
-        // Access-control attributes cannot be safely rotated by the generic
-        // password update path, so a caller must explicitly disable biometric
-        // unlock before replacing a valid protected item.
-        if passphrase_stored()? {
-            return Err(concat!(
-                "biometric unlock is already enabled; disable it before replacing ",
-                "the protected credential"
-            )
-            .into());
+        match passphrase_state()? {
+            PassphraseState::Stored => {
+                return Err(concat!(
+                    "biometric unlock is already enabled; disable it before replacing ",
+                    "the protected credential"
+                )
+                .into());
+            }
+            PassphraseState::Missing | PassphraseState::Invalidated => {
+                // The caller already verified the master passphrase against the
+                // vault. Missing and invalidated credentials are therefore safe
+                // to clean up before creating a fresh current-set item.
+                delete_if_present()?;
+            }
         }
-
-        // The probe established that there is no usable credential. An
-        // invalidated item can still be addressable for deletion on some macOS
-        // versions, so clean it up before creating the new current-set item.
-        // If the subsequent add fails, no working credential has been removed.
-        delete_if_present()?;
 
         // Build the access-control object explicitly instead of using
         // PasswordOptions::set_access_control_options(), which unwraps ACL
@@ -182,6 +204,34 @@ mod macos {
                 Some(message) => format!("keychain error (code {code}): {message}"),
                 None => format!("keychain error (code {code})"),
             },
+        }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::{
+            classify_passphrase_status, PassphraseState, ERR_SEC_INTERACTION_NOT_ALLOWED,
+        };
+        use security_framework_sys::base::{errSecAuthFailed, errSecItemNotFound, errSecSuccess};
+
+        #[test]
+        fn classifies_invalidated_biometry_as_replaceable() {
+            assert_eq!(
+                classify_passphrase_status(errSecAuthFailed).unwrap(),
+                PassphraseState::Invalidated
+            );
+            assert_eq!(
+                classify_passphrase_status(errSecItemNotFound).unwrap(),
+                PassphraseState::Missing
+            );
+            assert_eq!(
+                classify_passphrase_status(errSecSuccess).unwrap(),
+                PassphraseState::Stored
+            );
+            assert_eq!(
+                classify_passphrase_status(ERR_SEC_INTERACTION_NOT_ALLOWED).unwrap(),
+                PassphraseState::Stored
+            );
         }
     }
 }
@@ -267,9 +317,10 @@ pub async fn store_biometric_passphrase(
 /// Unlock the vault by retrieving the passphrase from the keychain. On an
 /// enabled macOS build this triggers the Touch ID prompt. The blocking OS call
 /// runs off the async runtime so the application stays responsive while
-/// authentication is open.
+/// authentication is open. A newer lock invalidates the attempt before commit.
 #[tauri::command]
 pub async fn unlock_with_biometric(state: State<'_, Arc<AppState>>) -> ApiResult<bool> {
+    let generation = state.auth_generation.current();
     let passphrase = tokio::task::spawn_blocking(platform::retrieve_passphrase)
         .await
         .map_err(|e| e.to_string())??;
@@ -281,6 +332,9 @@ pub async fn unlock_with_biometric(state: State<'_, Arc<AppState>>) -> ApiResult
     drop(vault);
 
     let mut pw = state.passphrase.lock().await;
+    if !state.auth_generation.is_current(generation) {
+        return Err("biometric unlock was superseded by a newer vault lock".into());
+    }
     *pw = Some(passphrase);
 
     Ok(true)

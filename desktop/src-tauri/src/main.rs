@@ -59,7 +59,7 @@ fn main() {
             commands::vault_is_initialized,
             vault_commands::secure_initialize_vault,
             vault_commands::secure_unlock_vault,
-            commands::lock_vault,
+            vault_commands::lock_vault,
             commands::is_vault_unlocked,
             biometric::biometric_available,
             biometric::biometric_passphrase_stored,

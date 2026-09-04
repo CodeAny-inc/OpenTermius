@@ -4,9 +4,40 @@ use opentermius_core::sftp::SftpManager;
 use opentermius_core::store::Store;
 use opentermius_core::vault::Vault;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter};
 use tokio::sync::Mutex;
+
+/// Monotonic generation used to invalidate unlock attempts that started before
+/// a newer lock (or vault initialization) operation. The passphrase mutex still
+/// serializes the final state write; this generation additionally prevents a
+/// long-running biometric request from resurrecting an older unlocked state.
+pub struct AuthGeneration {
+    value: AtomicU64,
+}
+
+impl AuthGeneration {
+    pub fn new() -> Self {
+        Self {
+            value: AtomicU64::new(0),
+        }
+    }
+
+    pub fn current(&self) -> u64 {
+        self.value.load(Ordering::SeqCst)
+    }
+
+    pub fn invalidate(&self) -> u64 {
+        self.value
+            .fetch_add(1, Ordering::SeqCst)
+            .wrapping_add(1)
+    }
+
+    pub fn is_current(&self, generation: u64) -> bool {
+        self.current() == generation
+    }
+}
 
 /// Shared app state. The vault passphrase is held in memory only for the
 /// duration of an unlocked session; it is never persisted. On lock, it is
@@ -16,6 +47,7 @@ pub struct AppState {
     pub vault: Mutex<Vault>,
     pub known_hosts: Arc<Mutex<KnownHosts>>,
     pub passphrase: Mutex<Option<zeroize::Zeroizing<String>>>,
+    pub auth_generation: AuthGeneration,
     pub sessions: Arc<SessionManager>,
     pub sftp: Arc<SftpManager>,
     pub local_terminals: Mutex<std::collections::HashMap<String, LocalTerminal>>,
@@ -67,6 +99,7 @@ impl AppState {
             vault: Mutex::new(vault),
             known_hosts: Arc::new(Mutex::new(known_hosts)),
             passphrase: Mutex::new(None),
+            auth_generation: AuthGeneration::new(),
             sessions,
             sftp,
             local_terminals: Mutex::new(std::collections::HashMap::new()),
@@ -85,4 +118,21 @@ pub struct SessionDataEvent {
 pub struct SessionClosedEvent {
     pub session_id: String,
     pub reason: String,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::AuthGeneration;
+
+    #[test]
+    fn invalidating_auth_generation_rejects_older_attempts() {
+        let generation = AuthGeneration::new();
+        let original = generation.current();
+        assert!(generation.is_current(original));
+
+        let next = generation.invalidate();
+        assert_ne!(original, next);
+        assert!(!generation.is_current(original));
+        assert!(generation.is_current(next));
+    }
 }

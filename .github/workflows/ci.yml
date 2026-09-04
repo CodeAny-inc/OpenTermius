@@ -18,8 +18,10 @@ jobs:
           sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libssl-dev
       - name: Cargo check
         run: cargo check --workspace
-      - name: Cargo test
+      - name: Cargo test (core)
         run: cargo test -p opentermius-core
+      - name: Cargo test (desktop backend)
+        run: cargo test -p opentermius-desktop
 
   macos-rust-build:
     runs-on: macos-14
@@ -30,6 +32,8 @@ jobs:
         run: cargo build --workspace
       - name: Cargo build (macOS biometric implementation)
         run: cargo build -p opentermius-desktop --features macos-biometric
+      - name: Cargo test (macOS biometric implementation)
+        run: cargo test -p opentermius-desktop --features macos-biometric
 
   frontend-build:
     runs-on: ubuntu-latest
