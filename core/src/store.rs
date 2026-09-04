@@ -85,6 +85,11 @@ impl Store {
                 h.group_id = None;
             }
         });
+        self.data.identities.iter_mut().for_each(|i| {
+            if i.group_id == Some(id) {
+                i.group_id = None;
+            }
+        });
         self.save()
     }
 

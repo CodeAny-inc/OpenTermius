@@ -1,8 +1,9 @@
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-/// A workspace is a collection of saved terminal layouts (tabs + panes).
-/// Users can switch between workspaces to restore different working contexts.
+/// A workspace is a collection of saved terminal layouts (tabs + panes),
+/// associated hosts, and metadata. Users can switch between workspaces to
+/// restore different working contexts.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Workspace {
     pub id: Uuid,
@@ -11,6 +12,18 @@ pub struct Workspace {
     pub tabs: Vec<TabLayout>,
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub icon: Option<String>,
+    /// Human-readable description of what this workspace is for.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub description: Option<String>,
+    /// Color label for visual identification (e.g. "#3b82f6").
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub color: Option<String>,
+    /// Hosts associated with this workspace (quick-access list).
+    #[serde(default)]
+    pub host_ids: Vec<Uuid>,
+    /// If true, restoring the workspace auto-connects all SSH panes.
+    #[serde(default)]
+    pub auto_connect: bool,
 }
 
 /// A tab contains one or more panes arranged in a split layout.
@@ -67,6 +80,10 @@ impl Workspace {
             name: name.into(),
             tabs: Vec::new(),
             icon: None,
+            description: None,
+            color: None,
+            host_ids: Vec::new(),
+            auto_connect: false,
         }
     }
 }

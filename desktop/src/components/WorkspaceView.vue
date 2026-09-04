@@ -1,13 +1,15 @@
 <script setup lang="ts">
-import { ref, onMounted } from "vue";
+import { ref, onMounted, computed } from "vue";
 import { useWorkspacesStore } from "../stores/workspaces";
 import { useTabsStore, isPane, isSplit, type PaneTree } from "../stores/tabs";
 import { useHostsStore } from "../stores/hosts";
 import Button from "./ui/Button.vue";
 import Input from "./ui/Input.vue";
+import Textarea from "./ui/Textarea.vue";
 import Dialog from "./ui/Dialog.vue";
 import FormGroup from "./ui/FormGroup.vue";
 import Label from "./ui/Label.vue";
+import Badge from "./ui/Badge.vue";
 import {
   FolderOpen,
   Plus,
@@ -17,6 +19,12 @@ import {
   Save,
   Play,
   LayoutGrid,
+  Server,
+  Link2,
+  Unlink,
+  Zap,
+  ZapOff,
+  Search,
 } from "lucide-vue-next";
 import type { Workspace, TabLayout, PaneLayout, Host } from "../types";
 
@@ -26,30 +34,89 @@ const hosts = useHostsStore();
 
 const showForm = ref(false);
 const editing = ref<Workspace | null>(null);
-const name = ref("");
+
+// Form state
+const form = ref({
+  name: "",
+  description: "",
+  color: "",
+  autoConnect: false,
+  hostIds: [] as string[],
+});
+
+// Host picker for associating hosts
+const showHostPicker = ref(false);
+const pickerWorkspace = ref<Workspace | null>(null);
+const hostSearchQuery = ref("");
+
+const filteredHostsForPicker = computed(() => {
+  if (!hostSearchQuery.value.trim()) return hosts.hosts;
+  const q = hostSearchQuery.value.toLowerCase();
+  return hosts.hosts.filter(
+    (h) =>
+      h.label.toLowerCase().includes(q) ||
+      h.hostname.toLowerCase().includes(q) ||
+      h.username.toLowerCase().includes(q),
+  );
+});
 
 onMounted(() => {
   workspaces.load();
+  hosts.load();
 });
 
+// --- workspace form ---
 function addWorkspace() {
   editing.value = null;
-  name.value = "";
+  form.value = {
+    name: "",
+    description: "",
+    color: "",
+    autoConnect: false,
+    hostIds: [],
+  };
   showForm.value = true;
 }
 
 function editWorkspace(ws: Workspace) {
   editing.value = ws;
-  name.value = ws.name;
+  form.value = {
+    name: ws.name,
+    description: ws.description ?? "",
+    color: ws.color ?? "",
+    autoConnect: ws.auto_connect ?? false,
+    hostIds: [...(ws.host_ids ?? [])],
+  };
   showForm.value = true;
 }
 
 async function save() {
-  if (!name.value.trim()) return;
+  if (!form.value.name.trim()) return;
+  const wsData: Workspace = {
+    id: editing.value?.id ?? crypto.randomUUID(),
+    name: form.value.name.trim(),
+    tabs: editing.value?.tabs ?? [],
+    icon: editing.value?.icon ?? null,
+    description: form.value.description.trim() || null,
+    color: form.value.color || null,
+    host_ids: form.value.hostIds,
+    auto_connect: form.value.autoConnect,
+  };
   if (editing.value) {
-    await workspaces.saveWorkspace({ ...editing.value, name: name.value });
+    await workspaces.saveWorkspace(wsData);
   } else {
-    await workspaces.createWorkspace(name.value);
+    await workspaces.createWorkspace(form.value.name.trim());
+    // If we created new, also save the extra fields
+    const created = workspaces.workspaces[workspaces.workspaces.length - 1];
+    if (created) {
+      await workspaces.saveWorkspace({
+        ...created,
+        description: form.value.description.trim() || null,
+        color: form.value.color || null,
+        host_ids: form.value.hostIds,
+        auto_connect: form.value.autoConnect,
+      });
+    }
   }
   showForm.value = false;
 }
@@ -60,7 +127,7 @@ async function remove(id: string, name: string) {
   }
 }
 
-// --- Save current tab layout into a workspace ---
+// --- save current tab layout into a workspace ---
 function paneTreeToLayout(node: PaneTree): PaneLayout {
   if (isPane(node)) {
     return {
@@ -79,7 +146,6 @@ function paneTreeToLayout(node: PaneTree): PaneLayout {
 }
 
 async function saveCurrentLayout(ws: Workspace) {
-  // Convert current tabs to TabLayouts
   const tabLayouts: TabLayout[] = tabs.tabs.map((tab) => ({
     id: tab.id,
     title: tab.title,
@@ -88,7 +154,7 @@ async function saveCurrentLayout(ws: Workspace) {
   await workspaces.saveWorkspace({ ...ws, tabs: tabLayouts });
 }
 
-// --- Restore a workspace layout into tabs ---
+// --- restore a workspace layout into tabs ---
 function layoutToPaneTree(layout: PaneLayout): PaneTree {
   if (layout.type === "pane") {
     const host: Host | undefined = layout.host_id
@@ -115,7 +181,6 @@ function layoutToPaneTree(layout: PaneLayout): PaneTree {
 
 function restoreWorkspace(ws: Workspace) {
   if (!ws.tabs || ws.tabs.length === 0) {
-    // Just create a fresh local terminal
     tabs.newTab();
     return;
   }
@@ -137,6 +202,74 @@ function restoreWorkspace(ws: Workspace) {
     tabs.setActiveTab(tabs.tabs[0].id);
   }
 }
+
+// --- host association ---
+function openHostPicker(ws: Workspace) {
+  pickerWorkspace.value = ws;
+  hostSearchQuery.value = "";
+  showHostPicker.value = true;
+}
+
+function toggleHostInPicker(hostId: string) {
+  if (!pickerWorkspace.value) return;
+  const ids = pickerWorkspace.value.host_ids ?? [];
+  if (ids.includes(hostId)) {
+    pickerWorkspace.value = {
+      ...pickerWorkspace.value,
+      host_ids: ids.filter((id) => id !== hostId),
+    };
+  } else {
+    pickerWorkspace.value = {
+      ...pickerWorkspace.value,
+      host_ids: [...ids, hostId],
+    };
+  }
+}
+
+async function saveHostAssociations() {
+  if (!pickerWorkspace.value) return;
+  await workspaces.saveWorkspace(pickerWorkspace.value);
+  showHostPicker.value = false;
+  pickerWorkspace.value = null;
+}
+
+function isHostAssociated(ws: Workspace, hostId: string): boolean {
+  return ws.host_ids?.includes(hostId) ?? false;
+}
+
+function associatedHosts(ws: Workspace): Host[] {
+  return (ws.host_ids ?? [])
+    .map((id) => hosts.hosts.find((h) => h.id === id))
+    .filter((h): h is Host => !!h);
+}
+
+// --- helpers ---
+function paneCount(ws: Workspace): number {
+  let count = 0;
+  function countPanes(layout: PaneLayout) {
+    if (layout.type === "pane") {
+      count++;
+    } else {
+      countPanes(layout.first);
+      countPanes(layout.second);
+    }
+  }
+  for (const tab of ws.tabs ?? []) {
+    countPanes(tab.layout);
+  }
+  return count;
+}
+
+const colorOptions = [
+  { value: "", label: "None" },
+  { value: "#3b82f6", label: "Blue" },
+  { value: "#10b981", label: "Green" },
+  { value: "#f59e0b", label: "Amber" },
+  { value: "#ef4444", label: "Red" },
+  { value: "#8b5cf6", label: "Purple" },
+  { value: "#ec4899", label: "Pink" },
+  { value: "#6366f1", label: "Indigo" },
+];
 </script>
 
 <template>
@@ -152,68 +285,119 @@ function restoreWorkspace(ws: Workspace) {
       </div>
     </div>
 
-    <!-- Info banner -->
-    <div class="px-4 py-2 border-b border-border bg-muted/30">
-      <p class="text-[11px] text-muted-foreground flex items-center gap-1.5">
-        <LayoutGrid class="size-3" :stroke-width="1.75" />
-        Save your current terminal tab layout into a workspace, or restore a saved layout.
-      </p>
-    </div>
-
     <!-- Content -->
-    <div class="flex-1 overflow-y-auto p-3">
-      <div v-if="workspaces.workspaces.length" class="flex flex-col gap-1.5">
+    <div class="flex-1 overflow-y-auto p-4">
+      <div v-if="workspaces.workspaces.length" class="flex flex-col gap-3 max-w-[800px]">
         <div
           v-for="ws in workspaces.workspaces"
           :key="ws.id"
-          class="group flex items-center gap-3 rounded-md border border-border bg-card p-3 transition-colors duration-100 hover:border-muted-foreground/30"
+          class="group rounded-lg border border-border bg-card overflow-hidden transition-colors duration-100 hover:border-muted-foreground/30"
         >
-          <div class="flex h-9 w-9 items-center justify-center rounded-md bg-muted">
-            <FolderOpen class="size-4 text-muted-foreground" :stroke-width="1.75" />
-          </div>
-          <div class="flex-1 min-w-0">
-            <div class="text-[13px] font-medium truncate">{{ ws.name }}</div>
-            <div class="text-[11px] text-muted-foreground truncate mt-0.5">
-              {{ ws.tabs?.length || 0 }} saved tab layout{{ (ws.tabs?.length || 0) === 1 ? '' : 's' }}
+          <!-- Workspace header -->
+          <div class="flex items-center gap-3 p-4">
+            <!-- Color dot -->
+            <div
+              v-if="ws.color"
+              class="h-3 w-3 rounded-full shrink-0"
+              :style="{ backgroundColor: ws.color }"
+            />
+            <div class="flex h-10 w-10 items-center justify-center rounded-md bg-muted shrink-0">
+              <FolderOpen class="size-5 text-muted-foreground" :stroke-width="1.75" />
+            </div>
+            <div class="flex-1 min-w-0">
+              <div class="flex items-center gap-2">
+                <span class="text-[14px] font-semibold truncate">{{ ws.name }}</span>
+                <Badge v-if="ws.auto_connect" class="bg-primary/10 text-primary border-primary/20">
+                  <Zap class="size-2.5 mr-0.5" :stroke-width="2" />
+                  Auto-connect
+                </Badge>
+              </div>
+              <div v-if="ws.description" class="text-[12px] text-muted-foreground truncate mt-0.5">
+                {{ ws.description }}
+              </div>
+              <div class="text-[11px] text-muted-foreground mt-0.5 flex items-center gap-3">
+                <span class="flex items-center gap-1">
+                  <LayoutGrid class="size-3" :stroke-width="1.75" />
+                  {{ ws.tabs?.length || 0 }} tab{{ (ws.tabs?.length || 0) === 1 ? '' : 's' }}
+                </span>
+                <span>{{ paneCount(ws) }} pane{{ paneCount(ws) === 1 ? '' : 's' }}</span>
+                <span v-if="associatedHosts(ws).length" class="flex items-center gap-1">
+                  <Server class="size-3" :stroke-width="1.75" />
+                  {{ associatedHosts(ws).length }} host{{ associatedHosts(ws).length === 1 ? '' : 's' }}
+                </span>
+              </div>
+            </div>
+            <!-- Quick actions -->
+            <div class="flex items-center gap-1">
+              <button
+                class="flex h-7 items-center gap-1 rounded px-2 text-[11px] text-muted-foreground hover:bg-accent hover:text-foreground transition-colors duration-100"
+                aria-label="Save current layout"
+                title="Save current tab layout into this workspace"
+                @click="saveCurrentLayout(ws)"
+              >
+                <Save class="size-3" :stroke-width="1.75" />
+                Save Layout
+              </button>
+              <button
+                class="flex h-7 items-center gap-1 rounded px-2 text-[11px] font-medium text-primary hover:bg-primary/10 transition-colors duration-100"
+                aria-label="Restore workspace"
+                title="Restore this workspace's tabs"
+                @click="restoreWorkspace(ws)"
+              >
+                <Play class="size-3" :stroke-width="1.75" />
+                Open
+              </button>
+              <button
+                class="flex h-7 w-7 items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground transition-colors duration-100"
+                aria-label="Manage hosts"
+                title="Associate hosts with this workspace"
+                @click="openHostPicker(ws)"
+              >
+                <Link2 class="size-3.5" :stroke-width="1.75" />
+              </button>
+              <button
+                class="flex h-7 w-7 items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground transition-colors duration-100"
+                aria-label="Edit workspace"
+                @click="editWorkspace(ws)"
+              >
+                <Pencil class="size-3.5" :stroke-width="1.75" />
+              </button>
+              <button
+                class="flex h-7 w-7 items-center justify-center rounded text-muted-foreground hover:bg-destructive/20 hover:text-destructive transition-colors duration-100"
+                aria-label="Delete workspace"
+                @click="remove(ws.id, ws.name)"
+              >
+                <Trash2 class="size-3.5" :stroke-width="1.75" />
+              </button>
             </div>
           </div>
-          <div class="flex items-center gap-1">
-            <!-- Save current layout -->
-            <button
-              class="flex h-7 items-center gap-1 rounded px-2 text-[11px] text-muted-foreground hover:bg-accent hover:text-foreground transition-colors duration-100"
-              aria-label="Save current layout"
-              title="Save current tab layout into this workspace"
-              @click="saveCurrentLayout(ws)"
-            >
-              <Save class="size-3" :stroke-width="1.75" />
-              Save
-            </button>
-            <!-- Restore layout -->
-            <button
-              class="flex h-7 items-center gap-1 rounded px-2 text-[11px] text-muted-foreground hover:bg-accent hover:text-foreground transition-colors duration-100"
-              aria-label="Restore layout"
-              title="Restore this workspace's tab layout"
-              @click="restoreWorkspace(ws)"
-            >
-              <Play class="size-3" :stroke-width="1.75" />
-              Restore
-            </button>
-            <!-- Edit -->
-            <button
-              class="flex h-7 w-7 items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground transition-colors duration-100 opacity-0 group-hover:opacity-100 transition-opacity"
-              aria-label="Edit workspace"
-              @click="editWorkspace(ws)"
-            >
-              <Pencil class="size-3.5" :stroke-width="1.75" />
-            </button>
-            <!-- Delete -->
-            <button
-              class="flex h-7 w-7 items-center justify-center rounded text-muted-foreground hover:bg-destructive/20 hover:text-destructive transition-colors duration-100 opacity-0 group-hover:opacity-100 transition-opacity"
-              aria-label="Delete workspace"
-              @click="remove(ws.id, ws.name)"
-            >
-              <Trash2 class="size-3.5" :stroke-width="1.75" />
-            </button>
+
+          <!-- Associated hosts -->
+          <div v-if="associatedHosts(ws).length" class="border-t border-border px-4 py-2.5 bg-muted/20">
+            <div class="text-[10px] font-medium text-muted-foreground uppercase tracking-wide mb-1.5">
+              Quick Access Hosts
+            </div>
+            <div class="flex flex-wrap gap-1.5">
+              <div
+                v-for="h in associatedHosts(ws)"
+                :key="h.id"
+                class="flex items-center gap-1.5 rounded-md border border-border bg-background px-2 py-1 text-[11px]"
+              >
+                <Server class="size-3 text-muted-foreground" :stroke-width="1.75" />
+                <span class="font-medium">{{ h.label }}</span>
+                <span class="text-muted-foreground font-mono">{{ h.username }}@{{ h.hostname }}</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Empty layout hint -->
+          <div
+            v-if="!ws.tabs || ws.tabs.length === 0"
+            class="border-t border-border px-4 py-2.5 bg-muted/20"
+          >
+            <p class="text-[11px] text-muted-foreground">
+              No layout saved yet. Open some terminals, then click "Save Layout" to capture them.
+            </p>
           </div>
         </div>
       </div>
@@ -223,8 +407,9 @@ function restoreWorkspace(ws: Workspace) {
         <Folder class="size-8 text-muted-foreground/50" :stroke-width="1.5" />
         <div>
           <p class="text-[14px] font-medium text-foreground">No workspaces yet</p>
-          <p class="text-[12px] text-muted-foreground mt-1">
-            Create a workspace and save your terminal layouts for different projects
+          <p class="text-[12px] text-muted-foreground mt-1 max-w-[320px]">
+            Workspaces group hosts and terminal layouts by project or environment.
+            Create one to organize your work.
           </p>
         </div>
         <Button size="sm" @click="addWorkspace">
@@ -234,24 +419,137 @@ function restoreWorkspace(ws: Workspace) {
       </div>
     </div>
 
+    <!-- Create/Edit workspace dialog -->
     <Dialog
       v-if="showForm"
       :open="true"
       :title="editing ? 'Edit Workspace' : 'New Workspace'"
-      width="440px"
+      :description="editing ? 'Update workspace settings' : 'Create a workspace to organize hosts and terminal layouts by project'"
+      width="520px"
       @close="showForm = false"
     >
       <div class="flex flex-col gap-4">
         <FormGroup>
           <Label for="ws-name">Name</Label>
-          <Input id="ws-name" v-model="name" placeholder="Production, Staging..." @keydown.enter="save" />
+          <Input id="ws-name" v-model="form.name" placeholder="Production, Staging, Dev..." @keydown.enter="save" />
         </FormGroup>
+
+        <FormGroup>
+          <Label for="ws-desc">Description (optional)</Label>
+          <Textarea
+            id="ws-desc"
+            v-model="form.description"
+            :rows="2"
+            placeholder="What is this workspace for? e.g. 'Production servers and databases'"
+          />
+        </FormGroup>
+
+        <FormGroup>
+          <Label>Color label</Label>
+          <div class="flex flex-wrap gap-2">
+            <button
+              v-for="opt in colorOptions"
+              :key="opt.value"
+              class="flex h-8 w-8 items-center justify-center rounded-md border transition-all duration-100"
+              :class="form.color === opt.value ? 'border-foreground ring-2 ring-ring/20' : 'border-border hover:border-muted-foreground'"
+              :style="opt.value ? { backgroundColor: opt.value } : {}"
+              @click="form.color = opt.value"
+            >
+              <span v-if="!opt.value" class="text-[10px] text-muted-foreground">None</span>
+            </button>
+          </div>
+        </FormGroup>
+
+        <FormGroup>
+          <div class="flex items-center justify-between">
+            <div>
+              <Label>Auto-connect on restore</Label>
+              <p class="text-[11px] text-muted-foreground mt-0.5">
+                Automatically connect to all SSH hosts when opening this workspace
+              </p>
+            </div>
+            <button
+              class="flex h-6 w-11 items-center rounded-full transition-colors duration-100 shrink-0"
+              :class="form.autoConnect ? 'bg-primary' : 'bg-muted'"
+              @click="form.autoConnect = !form.autoConnect"
+            >
+              <div
+                class="h-4 w-4 rounded-full bg-white transition-transform duration-100"
+                :class="form.autoConnect ? 'translate-x-6' : 'translate-x-1'"
+              />
+            </button>
+          </div>
+        </FormGroup>
+
+        <div v-if="editing && form.hostIds.length > 0" class="text-[12px] text-muted-foreground">
+          {{ form.hostIds.length }} host{{ form.hostIds.length === 1 ? '' : 's' }} associated.
+          Use the link icon on the workspace card to manage hosts.
+        </div>
       </div>
+
       <template #footer>
         <Button variant="ghost" @click="showForm = false">Cancel</Button>
-        <Button :disabled="!name.trim()" @click="save">
+        <Button :disabled="!form.name.trim()" @click="save">
           {{ editing ? "Save changes" : "Create workspace" }}
         </Button>
+      </template>
+    </Dialog>
+
+    <!-- Host picker dialog -->
+    <Dialog
+      v-if="showHostPicker && pickerWorkspace"
+      :open="true"
+      title="Associate Hosts"
+      :description="`Select hosts to add to '${pickerWorkspace.name}' for quick access`"
+      width="520px"
+      @close="showHostPicker = false"
+    >
+      <div class="flex flex-col gap-3">
+        <!-- Search -->
+        <div class="relative">
+          <Search class="absolute left-2.5 top-1/2 -translate-y-1/2 size-3.5 text-muted-foreground" :stroke-width="1.75" />
+          <Input
+            v-model="hostSearchQuery"
+            placeholder="Search hosts..."
+            class="pl-8"
+          />
+        </div>
+
+        <!-- Host list -->
+        <div class="max-h-[300px] overflow-y-auto rounded-md border border-border">
+          <div
+            v-for="h in filteredHostsForPicker"
+            :key="h.id"
+            class="flex items-center gap-2.5 px-3 py-2 cursor-pointer transition-colors duration-100 hover:bg-muted border-b border-border last:border-b-0"
+            @click="toggleHostInPicker(h.id)"
+          >
+            <div
+              class="flex h-4 w-4 items-center justify-center rounded border transition-colors duration-100 shrink-0"
+              :class="isHostAssociated(pickerWorkspace, h.id) ? 'bg-primary border-primary' : 'border-muted-foreground'"
+            >
+              <svg v-if="isHostAssociated(pickerWorkspace, h.id)" class="size-3 text-primary-foreground" viewBox="0 0 12 12" fill="none">
+                <path d="M2 6l2.5 2.5L10 3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
+              </svg>
+            </div>
+            <Server class="size-3.5 text-muted-foreground shrink-0" :stroke-width="1.75" />
+            <div class="flex-1 min-w-0">
+              <span class="text-[12px] font-medium">{{ h.label }}</span>
+              <span class="text-[11px] text-muted-foreground font-mono ml-2">{{ h.username }}@{{ h.hostname }}:{{ h.port }}</span>
+            </div>
+          </div>
+          <div v-if="!filteredHostsForPicker.length" class="px-3 py-6 text-center text-[12px] text-muted-foreground">
+            No hosts found
+          </div>
+        </div>
+
+        <p class="text-[11px] text-muted-foreground">
+          {{ (pickerWorkspace.host_ids ?? []).length }} host{{ (pickerWorkspace.host_ids ?? []).length === 1 ? '' : 's' }} selected
+        </p>
+      </div>
+
+      <template #footer>
+        <Button variant="ghost" @click="showHostPicker = false">Cancel</Button>
+        <Button @click="saveHostAssociations">Save associations</Button>
       </template>
     </Dialog>
   </div>

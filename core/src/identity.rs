@@ -20,6 +20,9 @@ pub struct Identity {
     pub key_id: Option<Uuid>,
     #[serde(default)]
     pub tags: Vec<String>,
+    /// Optional group — shared with host groups for consistent organization.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub group_id: Option<Uuid>,
 }
 
 impl Identity {
@@ -31,6 +34,7 @@ impl Identity {
             auth: AuthMethod::Agent,
             key_id: None,
             tags: Vec::new(),
+            group_id: None,
         }
     }
 }

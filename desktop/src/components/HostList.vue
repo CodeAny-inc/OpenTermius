@@ -378,7 +378,7 @@ function authLabel(host: Host): string {
       v-if="showGroupForm"
       :open="true"
       title="New Group"
-      description="Create a group to organize your hosts"
+      description="Create a group to organize your hosts and identities"
       width="400px"
       @close="showGroupForm = false"
     >

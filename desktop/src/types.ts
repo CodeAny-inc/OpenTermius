@@ -36,6 +36,7 @@ export interface Identity {
   auth: AuthMethod;
   key_id?: Uuid | null;
   tags: string[];
+  group_id?: Uuid | null;
 }
 
 export interface KeyMeta {
@@ -57,6 +58,10 @@ export interface Workspace {
   name: string;
   tabs: TabLayout[];
   icon?: string | null;
+  description?: string | null;
+  color?: string | null;
+  host_ids?: Uuid[];
+  auto_connect?: boolean;
 }
 
 export interface TabLayout {
