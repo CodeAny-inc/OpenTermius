@@ -2,30 +2,6 @@ import { defineStore } from "pinia";
 import { ref, computed } from "vue";
 import * as api from "../api";
 
-const BIOMETRIC_ENABLED_KEY = "opentermius-biometric-enabled";
-
-function loadBiometricEnabled(): boolean {
-  try {
-    return localStorage.getItem(BIOMETRIC_ENABLED_KEY) === "true";
-  } catch {
-    return false;
-  }
-}
-
-function saveBiometricEnabled(enabled: boolean) {
-  try {
-    if (enabled) {
-      localStorage.setItem(BIOMETRIC_ENABLED_KEY, "true");
-    } else {
-      localStorage.removeItem(BIOMETRIC_ENABLED_KEY);
-    }
-  } catch {
-    // The backend credential remains authoritative; this marker is only used
-    // to decide whether to offer/attempt biometric unlock without probing the
-    // protected credential and triggering an authentication prompt.
-  }
-}
-
 export const useVaultStore = defineStore("vault", () => {
   const initialized = ref(false);
   const unlocked = ref(false);
@@ -38,21 +14,93 @@ export const useVaultStore = defineStore("vault", () => {
     () => initialized.value && !unlocked.value,
   );
 
+  let biometricStateRevision = 0;
+  let biometricMutationTail: Promise<void> = Promise.resolve();
+
+  function mutateBiometricState(operation: () => Promise<void>): Promise<void> {
+    // Invalidate in-flight snapshots immediately, not only after the write.
+    // Serialize writes across components so their backend and UI order agree.
+    ++biometricStateRevision;
+    const result = biometricMutationTail.then(operation);
+    // A failed write must not poison the queue for subsequent operations.
+    biometricMutationTail = result.catch(() => {});
+    return result;
+  }
+
+  // Only used inside a serialized mutation's error recovery. Public refreshes
+  // wait for that mutation, including this reconciliation, before querying.
+  async function reconcileBiometricState() {
+    biometricEnabled.value = false;
+    if (!initialized.value) return;
+
+    // Credential existence is independent of transient Touch ID availability.
+    biometricEnabled.value = await api.biometricPassphraseStored();
+  }
+
+  async function refreshBiometricState() {
+    const revision = ++biometricStateRevision;
+    // A probe started during enrollment/deletion must observe the completed
+    // mutation rather than read its old state and later overwrite its result.
+    await biometricMutationTail;
+    const isCurrent = () => revision === biometricStateRevision;
+    if (!isCurrent()) return;
+
+    try {
+      const available = await api.biometricAvailable();
+      if (!isCurrent()) return;
+      const enabled = initialized.value
+        ? await api.biometricPassphraseStored()
+        : false;
+      if (!isCurrent()) return;
+
+      // Publish the snapshot together; never mix an old capability response
+      // with enrollment from a newer operation.
+      biometricAvailable.value = available;
+      biometricEnabled.value = enabled;
+    } catch (e) {
+      // An obsolete failure must not erase a newer successful snapshot/write.
+      if (!isCurrent()) return;
+      biometricAvailable.value = false;
+      biometricEnabled.value = false;
+      throw e;
+    }
+  }
+
   async function checkStatus() {
+    error.value = null;
     initialized.value = await api.vaultIsInitialized();
     unlocked.value = await api.isVaultUnlocked();
-    biometricAvailable.value = await api.biometricAvailable();
-    biometricEnabled.value = biometricAvailable.value && loadBiometricEnabled();
+
+    try {
+      // The protected Keychain item is the source of truth only for an existing
+      // vault. Current LA availability is refreshed separately because it can
+      // change at runtime without changing whether the credential is enrolled.
+      await refreshBiometricState();
+    } catch (e) {
+      error.value = String(e);
+    }
   }
 
   async function initialize(passphrase: string) {
+    // Invalidate old biometric snapshots without queueing authentication behind
+    // credential writes. Dispatch to the backend immediately so a later lock
+    // can invalidate this initialization's authentication generation.
+    ++biometricStateRevision;
     error.value = null;
     try {
-      await api.initializeVault(passphrase);
+      // The backend owns the entire initialization boundary: it first rejects
+      // an already-initialized vault, then handles legacy Keychain cleanup and
+      // creates the new vault. Do not clear biometric state before that guard,
+      // or a stale frontend call could delete credentials for an existing vault.
+      const unlockedAfterInitialization = await api.initializeVault(passphrase);
+      // Also discard any snapshot started while initialization was pending.
+      ++biometricStateRevision;
       initialized.value = true;
-      unlocked.value = true;
+      unlocked.value = unlockedAfterInitialization;
+      biometricEnabled.value = false;
     } catch (e) {
       error.value = String(e);
+      throw e;
     }
   }
 
@@ -77,33 +125,57 @@ export const useVaultStore = defineStore("vault", () => {
         throw new Error("Biometric unlock failed");
       }
     } catch (e) {
-      error.value = String(e);
-      throw e;
+      const unlockError = e;
+      try {
+        // A failed attempt can itself change LocalAuthentication availability
+        // (for example by entering biometric lockout), so refresh both pieces of
+        // state while preserving the credential-enrollment bit independently.
+        await refreshBiometricState();
+      } catch {
+        // refreshBiometricState already fails closed. Preserve the original
+        // unlock error for the user instead of replacing it with a probe error.
+      }
+      error.value = String(unlockError);
+      throw unlockError;
     }
   }
 
   async function enableBiometric(passphrase: string) {
-    error.value = null;
-    try {
-      await api.storeBiometricPassphrase(passphrase);
-      biometricEnabled.value = true;
-      saveBiometricEnabled(true);
-    } catch (e) {
-      error.value = String(e);
-      throw e;
-    }
+    return mutateBiometricState(async () => {
+      error.value = null;
+      try {
+        await api.storeBiometricPassphrase(passphrase);
+        biometricEnabled.value = true;
+      } catch (e) {
+        const enableError = e;
+        try {
+          await reconcileBiometricState();
+        } catch {
+          // Fail closed and keep the original operation error.
+        }
+        error.value = String(enableError);
+        throw enableError;
+      }
+    });
   }
 
   async function disableBiometric() {
-    error.value = null;
-    try {
-      await api.clearBiometricPassphrase();
-      biometricEnabled.value = false;
-      saveBiometricEnabled(false);
-    } catch (e) {
-      error.value = String(e);
-      throw e;
-    }
+    return mutateBiometricState(async () => {
+      error.value = null;
+      try {
+        await api.clearBiometricPassphrase();
+        biometricEnabled.value = false;
+      } catch (e) {
+        const disableError = e;
+        try {
+          await reconcileBiometricState();
+        } catch {
+          // Fail closed and keep the original operation error.
+        }
+        error.value = String(disableError);
+        throw disableError;
+      }
+    });
   }
 
   async function lock() {
@@ -120,6 +192,7 @@ export const useVaultStore = defineStore("vault", () => {
     needsSetup,
     needsUnlock,
     checkStatus,
+    refreshBiometricState,
     initialize,
     unlock,
     unlockWithBiometric,

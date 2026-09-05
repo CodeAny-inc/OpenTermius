@@ -133,46 +133,6 @@ pub async fn vault_is_initialized(state: State<'_, Arc<AppState>>) -> ApiResult<
 }
 
 #[tauri::command]
-pub async fn initialize_vault(
-    state: State<'_, Arc<AppState>>,
-    passphrase: String,
-) -> ApiResult<()> {
-    let mut vault = state.vault.lock().await;
-    vault.initialize(&passphrase).map_err(err)?;
-    let mut pw = state.passphrase.lock().await;
-    *pw = Some(zeroize::Zeroizing::new(passphrase));
-    Ok(())
-}
-
-#[tauri::command]
-pub async fn unlock_vault(
-    state: State<'_, Arc<AppState>>,
-    passphrase: String,
-) -> ApiResult<()> {
-    // Try to decrypt with this passphrase — if it works, store it.
-    let vault = state.vault.lock().await;
-    if !vault.is_initialized() {
-        return Err("vault not initialized".into());
-    }
-    // Verify by trying to get a key (or just decrypt the payload)
-    // We use a test: try to read the ciphertext
-    vault.get_key(&passphrase, "__test__").ok(); // will error if wrong passphrase, but also if no key
-    // Actually, let's just store the passphrase and let operations fail later
-    // if it's wrong. A proper check would decrypt the payload.
-    drop(vault);
-    let mut pw = state.passphrase.lock().await;
-    *pw = Some(zeroize::Zeroizing::new(passphrase));
-    Ok(())
-}
-
-#[tauri::command]
-pub async fn lock_vault(state: State<'_, Arc<AppState>>) -> ApiResult<()> {
-    let mut pw = state.passphrase.lock().await;
-    *pw = None;
-    Ok(())
-}
-
-#[tauri::command]
 pub async fn is_vault_unlocked(state: State<'_, Arc<AppState>>) -> ApiResult<bool> {
     let pw = state.passphrase.lock().await;
     Ok(pw.is_some())
@@ -974,4 +934,3 @@ pub async fn install_update(
 
     Ok(())
 }
-
