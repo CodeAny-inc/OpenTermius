@@ -29,8 +29,14 @@ const displayRuntimeError = computed(() => error.value || vault.error || "");
 
 onMounted(async () => {
   await vault.checkStatus();
-  // If biometric is enabled, try to auto-unlock on mount
-  if (vault.biometricEnabled && vault.needsUnlock) {
+  // Enrollment and runtime availability are separate. Only auto-prompt when
+  // Touch ID can currently be evaluated; an enrolled-but-temporarily-unavailable
+  // credential remains visible in settings and can be disabled explicitly.
+  if (
+    vault.biometricAvailable &&
+    vault.biometricEnabled &&
+    vault.needsUnlock
+  ) {
     await tryBiometricUnlock();
   }
 });
@@ -225,7 +231,10 @@ const showBiometricButton = computed(
           </p>
 
           <!-- Biometric settings -->
-          <div v-if="vault.biometricAvailable" class="rounded-lg border border-border p-4">
+          <div
+            v-if="vault.biometricAvailable || vault.biometricEnabled"
+            class="rounded-lg border border-border p-4"
+          >
             <div class="flex items-center gap-2 mb-2">
               <Fingerprint class="size-4 text-muted-foreground" :stroke-width="1.75" />
               <span class="text-[13px] font-medium">Touch ID / Biometric Unlock</span>
@@ -239,8 +248,14 @@ const showBiometricButton = computed(
             <template v-if="vault.biometricEnabled">
               <p class="text-[12px] text-muted-foreground mb-3">
                 <Check class="inline size-3 text-green-500 mr-1" :stroke-width="2" />
-                Biometric unlock is enabled. You can unlock the vault with Touch ID
-                instead of typing your passphrase.
+                <template v-if="vault.biometricAvailable">
+                  Biometric unlock is enabled. You can unlock the vault with Touch ID
+                  instead of typing your passphrase.
+                </template>
+                <template v-else>
+                  Biometric unlock is enabled, but Touch ID is currently unavailable.
+                  You can still disable biometric unlock below.
+                </template>
               </p>
               <Button variant="outline" size="sm" @click="disableBiometric">
                 Disable biometric unlock
