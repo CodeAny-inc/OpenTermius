@@ -23,11 +23,23 @@ function focusPassphraseInput() {
 
 watch(
   () => ui.showVaultUnlockModal,
-  (open) => {
-    if (open) {
-      passphrase.value = "";
-      error.value = "";
-      loading.value = null;
+  async (open) => {
+    if (!open) return;
+
+    passphrase.value = "";
+    error.value = "";
+    loading.value = null;
+
+    // LAContext availability is runtime state, not enrollment state. Refresh it
+    // whenever an SSH flow asks for the vault so a temporary Touch ID lockout at
+    // app startup does not hide biometric unlock for the rest of the session.
+    try {
+      await vault.refreshBiometricState();
+    } catch (e) {
+      error.value = String(e);
+    }
+
+    if (ui.showVaultUnlockModal) {
       focusPassphraseInput();
     }
   },
