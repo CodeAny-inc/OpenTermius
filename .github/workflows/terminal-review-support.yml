@@ -20,7 +20,7 @@ jobs:
       - run: |
           npm ci --prefix desktop
           npm ci --prefix desktop/e2e --ignore-scripts
-          tar -czf "$RUNNER_TEMP/desktop-review-inputs.tgz" --exclude='.git' --exclude='dist' --exclude='ui-test-results' desktop AGENTS.md docs .github .gitignore
+          tar -czf "$RUNNER_TEMP/desktop-review-inputs.tgz" --exclude='.git' --exclude='desktop/dist' --exclude='desktop/ui-test-results' desktop AGENTS.md docs .github .gitignore
           gh --version
           gh pr edit --help > "$RUNNER_TEMP/gh-pr-edit-help.txt"
       - uses: actions/upload-artifact@v4
