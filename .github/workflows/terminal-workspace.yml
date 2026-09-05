@@ -1,0 +1,74 @@
+name: Terminal workspace UI
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'desktop/**'
+      - '.github/workflows/terminal-workspace.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  browser-ui:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          path: baseline
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+      - name: Install application dependencies
+        working-directory: desktop
+        run: npm ci
+      - name: Typecheck, unit tests and production build
+        working-directory: desktop
+        run: |
+          set -o pipefail
+          mkdir -p ui-test-results
+          npx vue-tsc --noEmit 2>&1 | tee ui-test-results/typecheck.log
+          npm test 2>&1 | tee ui-test-results/unit-tests.log
+          npm run build 2>&1 | tee ui-test-results/build.log
+      - name: Install isolated, pinned browser tooling
+        run: |
+          npm install --prefix desktop/e2e --ignore-scripts --no-audit --no-fund
+          desktop/e2e/node_modules/.bin/playwright install --with-deps chromium
+      - name: Start changed application and baseline
+        run: |
+          (cd desktop && npm run dev -- --host 127.0.0.1 > "$RUNNER_TEMP/terminal-vite.log" 2>&1) &
+          ln -s ../../desktop/node_modules baseline/desktop/node_modules
+          (cd baseline/desktop && ../../desktop/node_modules/.bin/vite --host 127.0.0.1 --port 1421 > "$RUNNER_TEMP/terminal-baseline.log" 2>&1) &
+          for attempt in $(seq 1 60); do
+            if curl --fail --silent http://127.0.0.1:1420 > /dev/null && curl --fail --silent http://127.0.0.1:1421 > /dev/null; then
+              exit 0
+            fi
+            sleep 1
+          done
+          cat "$RUNNER_TEMP/terminal-vite.log" "$RUNNER_TEMP/terminal-baseline.log"
+          exit 1
+      - name: Verify navigation, persistent hosts, layout and connection lifecycle
+        env:
+          UI_URL: http://127.0.0.1:1420
+          BASELINE_URL: http://127.0.0.1:1421
+          UI_RESULTS: ${{ github.workspace }}/desktop/ui-test-results
+        run: node desktop/e2e/terminal-workspace.mjs
+      - name: Upload screenshots, assertions and runnable frontend
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: terminal-workspace-ui-${{ github.run_id }}
+          retention-days: 14
+          path: |
+            desktop/ui-test-results/
+            desktop/dist/
+            desktop/e2e/
+            !desktop/e2e/node_modules/
+            ${{ runner.temp }}/terminal-vite.log
+            ${{ runner.temp }}/terminal-baseline.log
