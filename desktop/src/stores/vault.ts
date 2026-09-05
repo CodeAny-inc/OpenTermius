@@ -14,24 +14,52 @@ export const useVaultStore = defineStore("vault", () => {
     () => initialized.value && !unlocked.value,
   );
 
+  let biometricStateRevision = 0;
+  let biometricMutationTail: Promise<void> = Promise.resolve();
+
+  function mutateBiometricState(operation: () => Promise<void>): Promise<void> {
+    // Invalidate in-flight snapshots immediately, not only after the write.
+    // Serialize writes across components so their backend and UI order agree.
+    ++biometricStateRevision;
+    const result = biometricMutationTail.then(operation);
+    // A failed write must not poison the queue for subsequent operations.
+    biometricMutationTail = result.catch(() => {});
+    return result;
+  }
+
+  // Only used inside a serialized mutation's error recovery. Public refreshes
+  // wait for that mutation, including this reconciliation, before querying.
   async function reconcileBiometricState() {
     biometricEnabled.value = false;
     if (!initialized.value) return;
 
-    // Credential existence and current biometric availability are deliberately
-    // independent. canEvaluatePolicy can be false during a temporary Touch ID
-    // lockout, but the protected Keychain item remains enabled and should become
-    // usable again once LocalAuthentication can evaluate the policy.
+    // Credential existence is independent of transient Touch ID availability.
     biometricEnabled.value = await api.biometricPassphraseStored();
   }
 
   async function refreshBiometricState() {
+    const revision = ++biometricStateRevision;
+    // A probe started during enrollment/deletion must observe the completed
+    // mutation rather than read its old state and later overwrite its result.
+    await biometricMutationTail;
+    const isCurrent = () => revision === biometricStateRevision;
+    if (!isCurrent()) return;
+
     try {
-      biometricAvailable.value = await api.biometricAvailable();
-      await reconcileBiometricState();
+      const available = await api.biometricAvailable();
+      if (!isCurrent()) return;
+      const enabled = initialized.value
+        ? await api.biometricPassphraseStored()
+        : false;
+      if (!isCurrent()) return;
+
+      // Publish the snapshot together; never mix an old capability response
+      // with enrollment from a newer operation.
+      biometricAvailable.value = available;
+      biometricEnabled.value = enabled;
     } catch (e) {
-      // A failed capability or Keychain probe must never leave stale UI state
-      // advertising an unlock path whose current status could not be verified.
+      // An obsolete failure must not erase a newer successful snapshot/write.
+      if (!isCurrent()) return;
       biometricAvailable.value = false;
       biometricEnabled.value = false;
       throw e;
@@ -54,20 +82,22 @@ export const useVaultStore = defineStore("vault", () => {
   }
 
   async function initialize(passphrase: string) {
-    error.value = null;
-    try {
-      // The backend owns the entire initialization boundary: it first rejects
-      // an already-initialized vault, then handles legacy Keychain cleanup and
-      // creates the new vault. Do not clear biometric state before that guard,
-      // or a stale frontend call could delete credentials for an existing vault.
-      const unlockedAfterInitialization = await api.initializeVault(passphrase);
-      initialized.value = true;
-      unlocked.value = unlockedAfterInitialization;
-      biometricEnabled.value = false;
-    } catch (e) {
-      error.value = String(e);
-      throw e;
-    }
+    return mutateBiometricState(async () => {
+      error.value = null;
+      try {
+        // The backend owns the entire initialization boundary: it first rejects
+        // an already-initialized vault, then handles legacy Keychain cleanup and
+        // creates the new vault. Do not clear biometric state before that guard,
+        // or a stale frontend call could delete credentials for an existing vault.
+        const unlockedAfterInitialization = await api.initializeVault(passphrase);
+        initialized.value = true;
+        unlocked.value = unlockedAfterInitialization;
+        biometricEnabled.value = false;
+      } catch (e) {
+        error.value = String(e);
+        throw e;
+      }
+    });
   }
 
   async function unlock(passphrase: string) {
@@ -107,37 +137,41 @@ export const useVaultStore = defineStore("vault", () => {
   }
 
   async function enableBiometric(passphrase: string) {
-    error.value = null;
-    try {
-      await api.storeBiometricPassphrase(passphrase);
-      biometricEnabled.value = true;
-    } catch (e) {
-      const enableError = e;
+    return mutateBiometricState(async () => {
+      error.value = null;
       try {
-        await reconcileBiometricState();
-      } catch {
-        // Fail closed and keep the original operation error.
+        await api.storeBiometricPassphrase(passphrase);
+        biometricEnabled.value = true;
+      } catch (e) {
+        const enableError = e;
+        try {
+          await reconcileBiometricState();
+        } catch {
+          // Fail closed and keep the original operation error.
+        }
+        error.value = String(enableError);
+        throw enableError;
       }
-      error.value = String(enableError);
-      throw enableError;
-    }
+    });
   }
 
   async function disableBiometric() {
-    error.value = null;
-    try {
-      await api.clearBiometricPassphrase();
-      biometricEnabled.value = false;
-    } catch (e) {
-      const disableError = e;
+    return mutateBiometricState(async () => {
+      error.value = null;
       try {
-        await reconcileBiometricState();
-      } catch {
-        // Fail closed and keep the original operation error.
+        await api.clearBiometricPassphrase();
+        biometricEnabled.value = false;
+      } catch (e) {
+        const disableError = e;
+        try {
+          await reconcileBiometricState();
+        } catch {
+          // Fail closed and keep the original operation error.
+        }
+        error.value = String(disableError);
+        throw disableError;
       }
-      error.value = String(disableError);
-      throw disableError;
-    }
+    });
   }
 
   async function lock() {
