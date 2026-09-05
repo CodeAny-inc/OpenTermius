@@ -55,7 +55,7 @@ pub async fn secure_initialize_vault(
     // This must happen before any Keychain cleanup: a mistaken initialize call
     // must not delete the credential belonging to an existing vault.
     ensure_vault_uninitialized(&vault)?;
-    crate::biometric::clear_for_vault_initialization()?;
+    crate::biometric::clear_for_vault_initialization().await;
     vault.initialize(passphrase.as_str()).map_err(err)?;
     drop(vault);
 
