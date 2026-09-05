@@ -9,9 +9,10 @@ import { useHostsStore } from "../stores/hosts";
 import { useIdentitiesStore } from "../stores/identities";
 import { useVaultStore } from "../stores/vault";
 import { useUiStore } from "../stores/ui";
+import ActionMenu, { type MenuAction } from "./ui/ActionMenu.vue";
 import * as api from "../api";
 import { SplitSquareHorizontal, SplitSquareVertical, X, GripVertical, Maximize2, Minimize2,
-  RotateCw, Search, ChevronUp, ChevronDown, CaseSensitive, Regex, WholeWord, Loader2 } from "lucide-vue-next";
+  RotateCw, Search, ChevronUp, ChevronDown, CaseSensitive, Regex, WholeWord, Loader2, ArrowUpRight } from "lucide-vue-next";
 import type { UnlistenFn } from "@tauri-apps/api/event";
 
 const props = withDefaults(defineProps<{ pane: Pane; tabId: string; visible?: boolean }>(), { visible: true });
@@ -39,7 +40,7 @@ const listeners: UnlistenFn[] = [];
 let currentSessionId: string | null = null;
 let disposed = false;
 let sessionEnded = false;
-let listenersReady = false;
+const listenersReady = ref(false);
 const isActive = computed(() => props.visible && tabs.activeTabId === props.tabId && tabs.activePaneId === props.pane.id);
 const isFullscreen = computed(() => ui.fullscreenPaneId === props.pane.id);
 const isDragging = computed(() => tabs.draggedPaneId === props.pane.id);
@@ -62,7 +63,7 @@ function writeError(message: string) {
   term?.write(`\r\n\x1b[31m${message}\x1b[0m\r\n`);
 }
 async function connectSession() {
-  if (disposed || connecting.value || !term || !listenersReady) return;
+  if (disposed || connecting.value || !term || !listenersReady.value) return;
   connecting.value = true;
   error.value = "";
   tabs.setPaneDisconnected(props.pane.id);
@@ -115,7 +116,7 @@ onMounted(async () => {
   if (!containerRef.value) return;
   term = new Terminal({ fontSize: 13,
     fontFamily: "'SFMono-Regular', 'SF Mono', 'Cascadia Code', 'Roboto Mono', ui-monospace, monospace",
-    theme: { background: "#000000", foreground: "#e6e9ef", cursor: "#4f9cf9", selectionBackground: "#264f78" },
+    theme: { background: getComputedStyle(document.documentElement).getPropertyValue("--terminal-background").trim() || "#10151e", foreground: "#e6e9ef", cursor: "#4f9cf9", selectionBackground: "#264f78" },
     cursorBlink: true, scrollback: 10000 });
   fitAddon = new FitAddon();
   searchAddon = new SearchAddon();
@@ -160,7 +161,7 @@ onMounted(async () => {
     });
     if (disposed) { closeListener(); return; }
     listeners.push(closeListener);
-    listenersReady = true;
+    listenersReady.value = true;
     await connectSession();
   } catch (cause) {
     if (!disposed) writeError(`Could not initialize terminal: ${String(cause)}`);
@@ -215,46 +216,56 @@ function drop(event: DragEvent) {
   event.preventDefault();
   tabs.dropPane(props.pane.id, dropPosition(event));
 }
-function moveToTab(event: Event) {
-  const select = event.target as HTMLSelectElement;
-  if (select.value) tabs.movePaneToTab(props.pane.id, select.value);
-  select.value = "";
+const hostAddress = computed(() => {
+  const host = hosts.hosts.find(item => item.id === props.pane.hostId);
+  return host ? `${host.username}@${host.hostname}` : "Local shell";
+});
+const actions = computed<MenuAction[]>(() => [
+  { id: "split-h", label: "Split right…", icon: SplitSquareHorizontal },
+  { id: "split-v", label: "Split below…", icon: SplitSquareVertical },
+  { id: "search", label: "Find in terminal", icon: Search, shortcut: "⌘ / Ctrl F", separator: true },
+  { id: "fullscreen", label: isFullscreen.value ? "Restore pane" : "Maximize pane", icon: isFullscreen.value ? Minimize2 : Maximize2 },
+  ...otherTabs.value.map((tab, index) => ({ id: `move:${tab.id}`, label: `Move to ${tab.title}`, icon: ArrowUpRight, separator: index === 0 })),
+  ...(!props.pane.connected ? [{ id: "reconnect", label: "Reconnect", icon: RotateCw, disabled: connecting.value || !listenersReady.value, separator: true }] : []),
+  { id: "close", label: "Close session", icon: X, danger: true, separator: true },
+]);
+function selectAction(id: string) {
+  if (id === "split-h") emit("split-h");
+  else if (id === "split-v") emit("split-v");
+  else if (id === "search") openSearch();
+  else if (id === "fullscreen") ui.toggleFullscreen(props.pane.id);
+  else if (id === "reconnect") void connectSession();
+  else if (id === "close") emit("close");
+  else if (id.startsWith("move:")) tabs.movePaneToTab(props.pane.id, id.slice(5));
 }
 </script>
 
 <template>
-  <div ref="paneRef" class="flex h-full w-full flex-col bg-black"
-    :class="[isFullscreen ? 'fixed inset-0 z-[90]' : 'relative', isActive ? 'ring-1 ring-inset ring-primary/60' : '']"
-    :data-session-id="pane.sessionId" :data-host-id="pane.hostId" :data-active="isActive"
+  <div ref="paneRef" class="terminal-pane flex h-full w-full min-w-0 flex-col"
+    :class="[isFullscreen ? 'fixed inset-0 z-[90]' : 'relative', isActive ? 'ring-1 ring-inset ring-blue-400/50' : '']"
+    :data-session-id="pane.sessionId" :data-connected="pane.connected" :data-host-id="pane.hostId" :data-active="isActive"
     @click="focusPane" @dragover="dragOver" @drop="drop"
     @dragleave="!paneRef?.contains($event.relatedTarget as Node) && tabs.clearDragOver()">
-    <header class="flex h-9 shrink-0 items-center gap-2 border-b border-border bg-sidebar px-2"
-      :class="isActive ? 'bg-primary/10' : ''">
-      <div class="flex min-w-0 flex-1 cursor-grab items-center gap-1.5" draggable="true"
+    <header class="pane-header" :class="{ 'pane-header-active': isActive }" data-testid="pane-header">
+      <div class="flex min-w-0 flex-1 cursor-grab items-center gap-2" draggable="true"
         :aria-label="`Drag pane ${pane.title}`" @dragstart="startDrag" @dragend="tabs.endDrag()">
-        <GripVertical class="size-3 shrink-0 text-muted-foreground" />
-        <span class="size-1.5 shrink-0 rounded-full" :class="pane.connected ? 'bg-green-500' : 'bg-muted-foreground'" />
-        <span class="truncate text-xs font-medium" :title="pane.title">{{ pane.title }}</span>
+        <GripVertical class="size-3 shrink-0 text-slate-500" />
+        <Loader2 v-if="connecting" class="size-3 shrink-0 animate-spin text-blue-300" aria-label="Connecting" />
+        <span v-else class="size-1.5 shrink-0 rounded-full" :class="pane.connected ? 'bg-emerald-400' : 'bg-slate-500'" :title="status" />
+        <span class="truncate text-[12px]" :title="`${pane.title} · ${hostAddress} · ${status}`">{{ hostAddress }}</span>
+        <span class="sr-only" role="status">{{ status }}</span>
       </div>
-      <span class="hidden shrink-0 text-[10px] text-muted-foreground lg:inline" role="status">{{ status }}</span>
-      <Loader2 v-if="connecting" class="size-3 animate-spin text-muted-foreground" />
-      <div class="flex shrink-0 items-center gap-0.5" @click.stop>
-        <select v-if="otherTabs.length" class="w-7 rounded bg-transparent text-xs text-muted-foreground" aria-label="Move pane to tab" title="Move this session to another tab" @change="moveToTab">
-          <option value="">↗</option><option v-for="tab in otherTabs" :key="tab.id" :value="tab.id">{{ tab.title }}</option>
-        </select>
-        <button v-if="!pane.connected" class="pane-button" :disabled="connecting || !listenersReady" aria-label="Reconnect" title="Reconnect" @click="connectSession"><RotateCw class="size-3.5" /></button>
+      <div class="flex shrink-0 items-center gap-0.5 text-slate-400" @click.stop>
         <button class="pane-button" aria-label="Search in terminal" title="Search (Cmd/Ctrl+F)" @click="openSearch"><Search class="size-3.5" /></button>
-        <button class="pane-button" :aria-label="isFullscreen ? 'Exit fullscreen' : 'Fullscreen'" @click="ui.toggleFullscreen(pane.id)"><Minimize2 v-if="isFullscreen" class="size-3.5" /><Maximize2 v-else class="size-3.5" /></button>
-        <button v-if="!isFullscreen" class="pane-button" aria-label="Split horizontally" title="Split right with a local shell" @click="emit('split-h')"><SplitSquareHorizontal class="size-3.5" /></button>
-        <button v-if="!isFullscreen" class="pane-button" aria-label="Split vertically" title="Split below with a local shell" @click="emit('split-v')"><SplitSquareVertical class="size-3.5" /></button>
-        <button class="pane-button hover:!text-destructive" aria-label="Close pane" title="Close this session" @click="emit('close')"><X class="size-3.5" /></button>
+        <button class="pane-button" :aria-label="isFullscreen ? 'Exit fullscreen' : 'Fullscreen'" :title="isFullscreen ? 'Restore pane (Escape)' : 'Maximize pane'" @click="ui.toggleFullscreen(pane.id)"><Minimize2 v-if="isFullscreen" class="size-3.5" /><Maximize2 v-else class="size-3.5" /></button>
+        <ActionMenu :label="`Actions for ${pane.title}`" :items="actions" :enabled="visible" @select="selectAction" />
       </div>
     </header>
     <div v-if="error" class="flex shrink-0 items-center gap-2 border-b border-border bg-background px-3 py-2 text-xs" role="alert">
       <span class="min-w-0 flex-1 text-muted-foreground">{{ error }}</span>
       <button v-if="!pane.connected" class="shrink-0 text-primary disabled:opacity-50" :disabled="connecting" @click.stop="connectSession">Reconnect</button>
     </div>
-    <div ref="containerRef" class="min-h-0 flex-1 overflow-hidden bg-black" />
+    <div ref="containerRef" class="min-h-0 flex-1 overflow-hidden" />
     <div v-if="showSearch" class="absolute right-2 top-10 z-40 flex max-w-[calc(100%-16px)] flex-wrap items-center gap-1 rounded-md border border-border bg-background p-1 shadow-lg" @click.stop @keydown.stop="searchKey">
       <input ref="searchInputRef" v-model="searchQuery" aria-label="Search terminal output" placeholder="Search..." class="h-7 w-36 min-w-0 bg-transparent px-2 text-xs outline-none" @input="doSearch()" />
       <button class="pane-button" :aria-pressed="searchCaseSensitive" aria-label="Case sensitive" @click="searchCaseSensitive = !searchCaseSensitive; doSearch()"><CaseSensitive class="size-3.5" /></button>
@@ -271,6 +282,9 @@ function moveToTab(event: Event) {
 </template>
 
 <style scoped>
-.pane-button { @apply flex h-7 w-7 items-center justify-center rounded text-muted-foreground hover:bg-sidebar-accent hover:text-foreground disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring; }
+.terminal-pane { background: var(--terminal-background); }
+.pane-header { @apply flex h-9 shrink-0 items-center gap-2 border-b px-2 text-slate-400; background: var(--terminal-toolbar); border-color: var(--terminal-border); }
+.pane-header-active { background: var(--terminal-toolbar-active); color: #e3e8f1; box-shadow: inset 2px 0 var(--workspace-accent); }
+.pane-button { @apply flex size-8 items-center justify-center rounded-md text-current hover:bg-white/10 disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring; }
 .pane-button[aria-pressed="true"] { @apply bg-primary/20 text-primary; }
 </style>

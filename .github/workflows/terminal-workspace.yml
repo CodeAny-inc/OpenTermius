@@ -20,16 +20,17 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
-      # Reproduce the historical bugs only against the known pre-fix base.
-      # Future PRs must not be expected to reproduce bugs already fixed in main.
+        with:
+          persist-credentials: false
       - uses: actions/checkout@v4
         if: github.event.pull_request.base.sha == 'c532f3234ecc64050908edd42c8ffc5fc64ce53b'
         with:
           ref: c532f3234ecc64050908edd42c8ffc5fc64ce53b
           path: baseline
+          persist-credentials: false
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: npm
           cache-dependency-path: desktop/package-lock.json
       - name: Install application dependencies
@@ -64,13 +65,26 @@ jobs:
           done
           cat "$RUNNER_TEMP/terminal-vite.log"
           exit 1
-      - name: Verify navigation, persistent hosts, layout and connection lifecycle
+      - name: Record and verify terminal interactions
         env:
           UI_URL: http://127.0.0.1:1420
           BASELINE_URL: ${{ github.event.pull_request.base.sha == 'c532f3234ecc64050908edd42c8ffc5fc64ce53b' && 'http://127.0.0.1:1421' || '' }}
           UI_RESULTS: ${{ github.workspace }}/desktop/ui-test-results
+          UI_RECORD: '1'
+          UI_SLOW_MO: '100'
         run: node desktop/e2e/terminal-workspace.mjs
-      - name: Upload screenshots, assertions and runnable frontend
+      - name: Prepare reviewable MP4 recordings
+        if: always()
+        run: |
+          if ! command -v ffmpeg >/dev/null; then
+            sudo apt-get update
+            sudo apt-get install -y ffmpeg
+          fi
+          for video in desktop/ui-test-results/*.webm; do
+            [ -f "$video" ] || continue
+            ffmpeg -hide_banner -loglevel error -y -i "$video" -c:v libx264 -preset fast -crf 22 -pix_fmt yuv420p -movflags +faststart "${video%.webm}.mp4"
+          done
+      - name: Upload screenshots, recordings, traces and test logs
         if: always()
         uses: actions/upload-artifact@v4
         with:
@@ -78,6 +92,7 @@ jobs:
           retention-days: 14
           path: |
             desktop/ui-test-results/
+            !desktop/ui-test-results/raw-video/
             desktop/dist/
             desktop/e2e/
             !desktop/e2e/node_modules/

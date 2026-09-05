@@ -5,6 +5,7 @@ import { useUiStore } from "../stores/ui";
 import TerminalPane from "./TerminalPane.vue";
 
 const props = defineProps<{ visible: boolean }>();
+const emit = defineEmits<{ "request-session": [paneId: string, direction: "horizontal" | "vertical"] }>();
 const tabs = useTabsStore();
 const ui = useUiStore();
 const root = ref<HTMLElement | null>(null);
@@ -97,16 +98,16 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div ref="root" class="relative flex-1 min-h-0 bg-border" data-testid="terminal-workspace">
+  <div ref="root" class="relative flex-1 min-h-0" style="background: var(--terminal-border)" data-testid="terminal-workspace">
     <!-- One keyed sibling list for ALL tabs. Never nest terminal owners under the
          split tree: changing tree depth or moving to a tab must not remount xterm. -->
     <div v-for="item in layout.panes" :key="item.pane.id"
       v-show="item.tabId === tabs.activeTabId"
-      class="absolute p-0.5" :style="paneStyle(item)" :data-pane-id="item.pane.id">
+      class="absolute p-px min-w-0 overflow-hidden" :style="paneStyle(item)" :data-pane-id="item.pane.id">
       <TerminalPane :pane="item.pane" :tab-id="item.tabId"
         :visible="visible && item.tabId === tabs.activeTabId"
-        @split-h="tabs.splitPane(item.pane.id, 'horizontal')"
-        @split-v="tabs.splitPane(item.pane.id, 'vertical')"
+        @split-h="emit('request-session', item.pane.id, 'horizontal')"
+        @split-v="emit('request-session', item.pane.id, 'vertical')"
         @close="tabs.closePane(item.pane.id)" />
     </div>
     <div v-for="d in layout.dividers" :key="d.node.id"
