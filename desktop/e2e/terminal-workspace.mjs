@@ -6,13 +6,15 @@ import { fileURLToPath } from "node:url";
 const url = process.env.UI_URL ?? "http://127.0.0.1:1420";
 const output = process.env.UI_RESULTS ?? "ui-test-results";
 await mkdir(output, { recursive: true });
-const browser = await chromium.launch({ headless: true });
+const browser = await chromium.launch({ headless: true, executablePath: process.env.CHROMIUM_EXECUTABLE_PATH });
 const checks = [];
 const errors = [];
 let page;
 const fixture = fileURLToPath(new URL("./tauri-fixture.js", import.meta.url));
 const check = (name, actual, expected = true) => { assert.deepEqual(actual, expected, name); checks.push({ name, passed: true }); };
 const screenshot = name => page.screenshot({ path: `${output}/${name}.png`, fullPage: false });
+// The host picker remains in a closed dialog, so only interact with visible list entries.
+const atlasLabel = () => page.getByText("Atlas Production", { exact: true }).filter({ visible: true }).first();
 async function fresh(target = url, baseline = false) {
   const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, colorScheme: "dark" });
   page = await context.newPage();
@@ -22,7 +24,7 @@ async function fresh(target = url, baseline = false) {
   });
   await page.addInitScript({ path: fixture });
   await page.goto(target);
-  await page.getByText("Atlas Production", { exact: true }).first().waitFor();
+  await atlasLabel().waitFor();
   return context;
 }
 const state = () => page.evaluate(() => ({ connects: window.__terminalTest.connects, closes: window.__terminalTest.closes, live: window.__terminalTest.live }));
@@ -44,11 +46,11 @@ async function navigate(name) {
 try {
   if (process.env.BASELINE_URL) {
     const context = await fresh(process.env.BASELINE_URL, true);
-    await page.getByText("Atlas Production", { exact: true }).first().dblclick();
+    await atlasLabel().dblclick();
     await page.waitForFunction(() => window.__terminalTest.connects.length === 1);
     await navigate("Files");
     await page.getByText("Connect to SFTP", { exact: true }).waitFor();
-    await page.getByText("Atlas Production", { exact: true }).first().click();
+    await atlasLabel().click();
     const stuckInFiles = await page.getByText("Connect to SFTP", { exact: true }).isVisible();
     await screenshot("00-before-files-navigation");
     await page.locator("aside nav").getByRole("button", { name: /^Terminal/ }).click();
@@ -64,8 +66,8 @@ try {
   const context = await fresh();
   check("Page identity", /OpenTermius/i.test(await page.title()));
   check("Expected URL", page.url().startsWith(url));
-  check("Meaningful initial content", await page.getByText("Atlas Production", { exact: true }).first().isVisible());
-  await page.getByText("Atlas Production", { exact: true }).first().dblclick();
+  check("Meaningful initial content", await atlasLabel().isVisible());
+  await atlasLabel().dblclick();
   const atlas = await connected("atlas");
   await page.evaluate(() => { window.__atlasTerminal = document.querySelector('[data-host-id="atlas"] .xterm'); });
   await command("atlas", "echo KEEP_ATLAS");
@@ -100,6 +102,16 @@ try {
   check("Keyboard resizing", await divider.getAttribute("aria-valuenow"), "55");
   await divider.dblclick();
   check("Equal split reset", await divider.getAttribute("aria-valuenow"), "50");
+  const dividerBounds = await divider.boundingBox();
+  await page.mouse.move(dividerBounds.x + 3, dividerBounds.y + 150);
+  await page.mouse.down();
+  await page.mouse.move(dividerBounds.x + 70, dividerBounds.y + 150, { steps: 4 });
+  const firstRatio = Number(await divider.getAttribute("aria-valuenow"));
+  await page.mouse.move(dividerBounds.x + 140, dividerBounds.y + 150, { steps: 4 });
+  const secondRatio = Number(await divider.getAttribute("aria-valuenow"));
+  await page.mouse.up();
+  check("Pointer resize continues across multiple updates", secondRatio > firstRatio && firstRatio > 50);
+  await divider.dblclick();
   await pane("orion").click({ position: { x: 50, y: 16 } });
   await page.getByRole("button", { name: "Local tab", exact: true }).click();
   await page.waitForFunction(() => window.__terminalTest.connects.length === 3);
@@ -110,12 +122,14 @@ try {
   check("Only focused split receives focus", true);
   await page.getByRole("button", { name: "Close tab Local", exact: true }).click();
   check("Closing another tab leaves hosts alive", (await state()).closes, [local]);
-  await page.getByLabel("Drag pane Atlas Production", { exact: true }).dragTo(pane("orion"));
+  await page.locator('[aria-label="Drag pane Atlas Production"]').dragTo(pane("orion"));
   check("Swap retains Atlas identity", await connected("atlas"), atlas);
   check("Swap retains Orion identity", await connected("orion"), orion);
   check("Swap causes no connections", (await state()).connects.length, 3);
+  await command("atlas", "echo ATLAS_AFTER_SWAP");
+  check("Input still targets Atlas after swap", await page.evaluate(() => window.__terminalTest.writes.at(-1).id), atlas);
   const bounds = await pane("orion").boundingBox();
-  await page.getByLabel("Drag pane Atlas Production", { exact: true }).dragTo(pane("orion"), { targetPosition: { x: Math.floor(bounds.width / 2), y: bounds.height - 12 } });
+  await page.locator('[aria-label="Drag pane Atlas Production"]').dragTo(pane("orion"), { targetPosition: { x: Math.floor(bounds.width / 2), y: bounds.height - 12 } });
   check("Edge move does not close sessions", (await state()).closes, [local]);
   await screenshot("04-rearranged-with-history");
   await page.getByRole("button", { name: "Local tab", exact: true }).click();
@@ -127,6 +141,8 @@ try {
   check("Cross-tab move keeps original xterm DOM", await page.evaluate(() => document.querySelector('[data-host-id="atlas"] .xterm') === window.__atlasTerminal));
   check("Cross-tab move does not reconnect", (await state()).connects.length, 4);
   check("Cross-tab move does not close host", (await state()).closes, [local]);
+  await command("atlas", "echo ATLAS_AFTER_TAB_MOVE");
+  check("Input targets the original session after moving tabs", await page.evaluate(() => window.__terminalTest.writes.at(-1).id), atlas);
   await screenshot("05-session-moved-to-another-tab");
   await pane("atlas").getByRole("button", { name: "Search in terminal", exact: true }).click();
   await page.getByRole("textbox", { name: "Search terminal output" }).fill("KEEP_ATLAS");
@@ -141,10 +157,9 @@ try {
   check("Compact window has no page overflow", await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
   check("No Vite error overlay", await page.locator("vite-error-overlay").count(), 0);
   await context.close();
-
   const failureContext = await fresh();
   await page.evaluate(() => { window.__terminalTest.failNext = true; });
-  await page.getByText("Atlas Production", { exact: true }).first().dblclick();
+  await atlasLabel().dblclick();
   await page.getByRole("alert").waitFor();
   check("Connection failure is actionable", (await page.getByRole("alert").innerText()).includes("connection refused"));
   await screenshot("07-connection-error");
@@ -152,16 +167,16 @@ try {
   await connected("atlas");
   check("Explicit reconnect succeeds", (await state()).connects.length, 2);
   await failureContext.close();
-
   const raceContext = await fresh();
   await page.evaluate(() => { window.__terminalTest.holdNext = true; });
-  await page.getByText("Atlas Production", { exact: true }).first().dblclick();
+  await atlasLabel().dblclick();
   await page.waitForFunction(() => window.__terminalTest.pending.length === 1);
+  const pendingId = (await state()).connects[0].id;
   check("Pending connection displays Connecting", (await pane("atlas").innerText()).includes("Connecting"));
   check("Reconnect is disabled while connecting", await pane("atlas").getByRole("button", { name: "Reconnect", exact: true }).isDisabled());
   await pane("atlas").getByRole("button", { name: "Close pane", exact: true }).click();
   await page.evaluate(() => window.__terminalTest.release());
-  await page.waitForFunction(() => Object.keys(window.__terminalTest.live).length === 0);
+  await page.waitForFunction(id => !window.__terminalTest.live[id] && window.__terminalTest.closes.filter(c => c === id).length >= 2, pendingId);
   check("Late connection cannot resurrect closed pane", await page.locator("[data-pane-id]").count(), 0);
   await raceContext.close();
   check("Console and runtime health", errors, []);
@@ -171,6 +186,4 @@ try {
   if (page && !page.isClosed()) await screenshot("failure").catch(() => {});
   await writeFile(`${output}/results.json`, JSON.stringify({ passed: false, checks, errors, failure: String(error), stack: error.stack }, null, 2));
   throw error;
-} finally {
-  await browser.close();
-}
+} finally { await browser.close(); }
