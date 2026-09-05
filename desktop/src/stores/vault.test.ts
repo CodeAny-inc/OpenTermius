@@ -85,6 +85,39 @@ describe("vault store", () => {
       expect(store.error).toBeNull();
     });
 
+    it("keeps credential enrollment when Touch ID is temporarily unavailable", async () => {
+      const store = useVaultStore();
+      vi.mocked(api.vaultIsInitialized).mockResolvedValue(true);
+      vi.mocked(api.biometricAvailable).mockResolvedValue(false);
+      vi.mocked(api.biometricPassphraseStored).mockResolvedValue(true);
+
+      await store.checkStatus();
+
+      expect(api.biometricPassphraseStored).toHaveBeenCalledTimes(1);
+      expect(store.biometricAvailable).toBe(false);
+      expect(store.biometricEnabled).toBe(true);
+      expect(store.error).toBeNull();
+    });
+
+    it("recovers current Touch ID availability without losing enrollment state", async () => {
+      const store = useVaultStore();
+      store.initialized = true;
+      vi.mocked(api.biometricPassphraseStored).mockResolvedValue(true);
+      vi.mocked(api.biometricAvailable).mockResolvedValue(false);
+
+      await store.refreshBiometricState();
+      expect(store.biometricAvailable).toBe(false);
+      expect(store.biometricEnabled).toBe(true);
+
+      vi.mocked(api.biometricAvailable).mockResolvedValue(true);
+      await store.refreshBiometricState();
+
+      expect(api.biometricAvailable).toHaveBeenCalledTimes(2);
+      expect(api.biometricPassphraseStored).toHaveBeenCalledTimes(2);
+      expect(store.biometricAvailable).toBe(true);
+      expect(store.biometricEnabled).toBe(true);
+    });
+
     it("fails closed when the protected Keychain state cannot be queried", async () => {
       const store = useVaultStore();
       vi.mocked(api.vaultIsInitialized).mockResolvedValue(true);
@@ -95,7 +128,7 @@ describe("vault store", () => {
 
       await store.checkStatus();
 
-      expect(store.biometricAvailable).toBe(true);
+      expect(store.biometricAvailable).toBe(false);
       expect(store.biometricEnabled).toBe(false);
       expect(store.error).toBe("Error: Keychain unavailable");
     });
@@ -200,7 +233,7 @@ describe("vault store", () => {
       expect(store.error).toBe("Error: Touch ID credential invalidated");
     });
 
-    it("keeps biometric UI enabled when a failed attempt leaves the credential stored", async () => {
+    it("keeps biometric enrollment when a failed attempt leaves the credential stored", async () => {
       const store = useVaultStore();
       store.initialized = true;
       store.biometricAvailable = true;
@@ -234,6 +267,7 @@ describe("vault store", () => {
         "Touch ID authentication failed",
       );
 
+      expect(store.biometricAvailable).toBe(false);
       expect(store.biometricEnabled).toBe(false);
       expect(store.error).toBe("Error: Touch ID authentication failed");
     });
