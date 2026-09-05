@@ -71,7 +71,13 @@ function resizeKey(event: KeyboardEvent, d: Divider) {
   event.stopPropagation();
   tabs.setRatio(d.node.id, d.node.ratio + (event.key === keys[0] ? -0.05 : 0.05));
 }
-watch(() => [tabs.activeTabId, props.visible, layout.value.panes.map(p => p.pane.id).join(",")], () => {
+// Compare individual primitive values. Returning a new array from one getter
+// would cancel the drag after every reactive resize, even with unchanged IDs.
+watch([
+  () => tabs.activeTabId,
+  () => props.visible,
+  () => layout.value.panes.map(p => p.pane.id).join(","),
+], () => {
   stopDrag?.();
   if (!layout.value.panes.some(p => p.pane.id === ui.fullscreenPaneId && p.tabId === tabs.activeTabId) || !props.visible) ui.exitFullscreen();
 });
