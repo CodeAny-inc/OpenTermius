@@ -1,198 +1,150 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted } from "vue";
+import { computed, ref, nextTick, onMounted, onUnmounted } from "vue";
 import { useTabsStore, collectPanes } from "../stores/tabs";
+import { useHostsStore } from "../stores/hosts";
 import { useUiStore } from "../stores/ui";
-import { Plus, X, GripHorizontal, Circle, CircleDot, TerminalSquare } from "lucide-vue-next";
-import { cn } from "../lib/cn";
-import SplitView from "./SplitView.vue";
+import type { Host } from "../types";
+import { Plus, X, Server, TerminalSquare, SplitSquareHorizontal, SplitSquareVertical } from "lucide-vue-next";
+import TerminalWorkspace from "./TerminalWorkspace.vue";
 
+const props = withDefaults(defineProps<{ visible?: boolean }>(), { visible: true });
+const emit = defineEmits<{ activate: [] }>();
 const tabs = useTabsStore();
+const hosts = useHostsStore();
 const ui = useUiStore();
-
-// Tab drag state
 const draggedTabId = ref<string | null>(null);
-const dragOverTabId = ref<string | null>(null);
-
-function newTab() {
-  tabs.newTab();
+const hostDialog = ref<HTMLDialogElement | null>(null);
+const hostSearch = ref<HTMLInputElement | null>(null);
+const query = ref("");
+const placement = ref<"tab" | "horizontal" | "vertical">("horizontal");
+const matchingHosts = computed(() => hosts.hosts.filter(h =>
+  `${h.label} ${h.hostname} ${h.username}`.toLowerCase().includes(query.value.toLowerCase())));
+const paneCount = computed(() => tabs.activeTab ? collectPanes(tabs.activeTab.tree).length : 0);
+function activate(id: string) { tabs.setActiveTab(id); emit("activate"); }
+function newTab() { tabs.newTab(); emit("activate"); }
+function connected(id: string) {
+  const tab = tabs.tabs.find(t => t.id === id);
+  return tab ? collectPanes(tab.tree).filter(p => p.connected).length : 0;
 }
-
-function switchTab(id: string) {
-  tabs.setActiveTab(id);
+async function chooseHost() {
+  query.value = "";
+  if (!tabs.activePane) placement.value = "tab";
+  hostDialog.value?.showModal();
+  await nextTick();
+  hostSearch.value?.focus();
 }
-
-function closeTab(id: string) {
-  tabs.closeTab(id);
+function openHost(host: Host) {
+  if (placement.value === "tab" || !tabs.activePaneId) tabs.newTab(host);
+  else tabs.splitPane(tabs.activePaneId, placement.value, host);
+  hostDialog.value?.close();
+  emit("activate");
 }
-
-// Check if any pane in a tab is connected
-function tabHasConnection(tabId: string): boolean {
-  const tab = tabs.tabs.find((t) => t.id === tabId);
-  if (!tab) return false;
-  return collectPanes(tab.tree).some((p) => p.connected);
+function split(direction: "horizontal" | "vertical") {
+  if (tabs.activePaneId) tabs.splitPane(tabs.activePaneId, direction);
 }
-
-// Count connected panes in a tab
-function tabConnectedCount(tabId: string): number {
-  const tab = tabs.tabs.find((t) => t.id === tabId);
-  if (!tab) return 0;
-  return collectPanes(tab.tree).filter((p) => p.connected).length;
-}
-
-// --- Tab drag and drop (reordering) ---
-function onTabDragStart(e: DragEvent, tabId: string) {
-  draggedTabId.value = tabId;
-  if (e.dataTransfer) {
-    e.dataTransfer.effectAllowed = "move";
-    e.dataTransfer.setData("text/plain", tabId);
+function tabDrag(event: DragEvent, id: string) {
+  draggedTabId.value = id;
+  if (event.dataTransfer) {
+    event.dataTransfer.effectAllowed = "move";
+    event.dataTransfer.setData("text/plain", id);
   }
 }
-
-function onTabDragEnd() {
+function tabDrop(event: DragEvent, target: string) {
+  event.preventDefault();
+  if (tabs.draggedPaneId) {
+    tabs.movePaneToTab(tabs.draggedPaneId, target);
+    tabs.endDrag();
+    emit("activate");
+  } else if (draggedTabId.value) {
+    tabs.reorderTab(tabs.tabs.findIndex(t => t.id === draggedTabId.value), tabs.tabs.findIndex(t => t.id === target));
+  }
   draggedTabId.value = null;
-  dragOverTabId.value = null;
 }
-
-function onTabDragOver(e: DragEvent, tabId: string) {
-  if (!draggedTabId.value || draggedTabId.value === tabId) return;
-  e.preventDefault();
-  if (e.dataTransfer) {
-    e.dataTransfer.dropEffect = "move";
-  }
-  dragOverTabId.value = tabId;
-}
-
-function onTabDrop(e: DragEvent, targetTabId: string) {
-  e.preventDefault();
-  if (!draggedTabId.value || draggedTabId.value === targetTabId) {
-    onTabDragEnd();
-    return;
-  }
-
-  const fromIndex = tabs.tabs.findIndex((t) => t.id === draggedTabId.value);
-  const toIndex = tabs.tabs.findIndex((t) => t.id === targetTabId);
-  if (fromIndex >= 0 && toIndex >= 0) {
-    tabs.reorderTab(fromIndex, toIndex);
-  }
-  onTabDragEnd();
-}
-
-// Middle-click to close tab
-function onTabMiddleClick(e: MouseEvent, tabId: string) {
-  if (e.button === 1) {
-    e.preventDefault();
-    closeTab(tabId);
+function onKeyDown(event: KeyboardEvent) {
+  if (!props.visible || hostDialog.value?.open || event.defaultPrevented) return;
+  if ((event.metaKey || event.ctrlKey) && !event.shiftKey && !event.altKey) {
+    const directions = { ArrowLeft: "left", ArrowRight: "right", ArrowUp: "up", ArrowDown: "down" } as const;
+    const direction = directions[event.key as keyof typeof directions];
+    if (direction) { event.preventDefault(); tabs.navigatePane(direction); }
   }
 }
-
-// --- Keyboard navigation ---
-function onKeyDown(e: KeyboardEvent) {
-  // Cmd/Ctrl + Arrow keys to navigate between panes
-  if ((e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey) {
-    if (e.key === "ArrowUp") {
-      e.preventDefault();
-      tabs.navigatePane("up");
-    } else if (e.key === "ArrowDown") {
-      e.preventDefault();
-      tabs.navigatePane("down");
-    } else if (e.key === "ArrowLeft") {
-      e.preventDefault();
-      tabs.navigatePane("left");
-    } else if (e.key === "ArrowRight") {
-      e.preventDefault();
-      tabs.navigatePane("right");
-    }
-  }
-}
-
-onMounted(() => {
-  window.addEventListener("keydown", onKeyDown);
-});
-
-onUnmounted(() => {
-  window.removeEventListener("keydown", onKeyDown);
-});
+onMounted(() => window.addEventListener("keydown", onKeyDown));
+onUnmounted(() => window.removeEventListener("keydown", onKeyDown));
 </script>
 
 <template>
-  <!-- Tab bar (hidden when a pane is fullscreen) -->
-  <div v-show="!ui.fullscreenPaneId" class="flex h-10 items-center gap-0.5 border-b border-border bg-sidebar px-1.5 pl-11 md:pl-1.5 overflow-x-auto scrollbar-thin">
-    <div
-      v-for="tab in tabs.tabs"
-      :key="tab.id"
-      class="group flex h-7 items-center gap-1.5 rounded-md px-2 sm:px-2.5 text-[12px] cursor-pointer transition-all duration-100 relative shrink-0"
-      :class="cn(
-        tab.id === tabs.activeTabId
-          ? 'bg-background text-foreground shadow-sm'
-          : 'text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground',
-        dragOverTabId === tab.id && draggedTabId !== tab.id && 'ring-2 ring-primary ring-inset',
-        draggedTabId === tab.id && 'opacity-50',
-      )"
-      draggable="true"
-      @click="switchTab(tab.id)"
-      @mousedown="onTabMiddleClick($event, tab.id)"
-      @dragstart="onTabDragStart($event, tab.id)"
-      @dragend="onTabDragEnd"
-      @dragover="onTabDragOver($event, tab.id)"
-      @drop="onTabDrop($event, tab.id)"
-    >
-      <GripHorizontal class="size-3 text-muted-foreground/40 opacity-0 group-hover:opacity-100 transition-opacity hidden sm:block shrink-0" :stroke-width="1.75" />
-      <!-- Connection status dot -->
-      <CircleDot
-        v-if="tabHasConnection(tab.id)"
-        class="size-2.5 text-green-500 shrink-0"
-        :stroke-width="0"
-        fill="currentColor"
-      />
-      <Circle
-        v-else
-        class="size-2.5 text-muted-foreground/50 shrink-0"
-        :stroke-width="1.75"
-      />
-      <span class="truncate max-w-[80px] sm:max-w-[120px]">{{ tab.title }}</span>
-      <span v-if="tabConnectedCount(tab.id) > 1" class="text-[10px] text-muted-foreground/60 shrink-0">{{ tabConnectedCount(tab.id) }}</span>
-      <button
-        class="opacity-0 group-hover:opacity-100 transition-opacity rounded p-0.5 hover:bg-muted shrink-0"
-        @click.stop="closeTab(tab.id)"
-        aria-label="Close tab"
-      >
-        <X class="size-3" :stroke-width="1.75" />
-      </button>
-    </div>
-    <div class="ml-auto px-1 shrink-0">
-      <button
-        class="flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-sidebar-accent hover:text-foreground transition-colors duration-100"
-        @click="newTab"
-        aria-label="New tab"
-        title="New tab (Ctrl+N)"
-      >
-        <Plus class="size-3.5" :stroke-width="1.75" />
-      </button>
-    </div>
-  </div>
-
-  <!-- Terminal area — render ALL tabs with v-show to keep sessions alive -->
-  <div class="flex-1 relative overflow-hidden bg-black">
-    <div
-      v-for="tab in tabs.tabs"
-      :key="tab.id"
-      v-show="tab.id === tabs.activeTabId"
-      class="absolute inset-0"
-    >
-      <SplitView :node="tab.tree" :tab-id="tab.id" />
-    </div>
-    <div v-if="tabs.tabs.length === 0" class="flex flex-col items-center justify-center h-full gap-4 text-muted-foreground">
-      <div class="flex flex-col items-center gap-3">
-        <TerminalSquare class="size-12 text-muted-foreground/30" :stroke-width="1.5" />
-        <p class="text-[14px]">No active terminal</p>
+  <section class="flex flex-col min-h-0 min-w-0" :class="visible ? 'flex-1' : 'shrink-0'" aria-label="Terminal sessions">
+    <div v-show="!ui.fullscreenPaneId && (visible || tabs.tabs.length)"
+      class="flex h-11 shrink-0 items-center gap-1 border-b border-border bg-sidebar px-2 pl-11 md:pl-2 overflow-x-auto"
+      aria-label="Open terminal tabs">
+      <div v-for="tab in tabs.tabs" :key="tab.id" class="group flex shrink-0 items-center rounded-md border"
+        :class="visible && tab.id === tabs.activeTabId ? 'border-border bg-background shadow-sm' : 'border-transparent text-muted-foreground hover:bg-sidebar-accent'"
+        draggable="true" @dragstart="tabDrag($event, tab.id)" @dragend="draggedTabId = null"
+        @dragover.prevent @drop="tabDrop($event, tab.id)"
+        @auxclick.middle.prevent="tabs.closeTab(tab.id)">
+        <button class="flex h-8 items-center gap-2 px-3 text-xs rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          :aria-pressed="visible && tab.id === tabs.activeTabId" :data-tab-id="tab.id"
+          :title="`Show ${tab.title} terminal · ${connected(tab.id)} connected`" @click="activate(tab.id)">
+          <span class="size-1.5 rounded-full" :class="connected(tab.id) ? 'bg-green-500' : 'bg-muted-foreground'" aria-hidden="true" />
+          <span class="max-w-[160px] truncate">{{ tab.title }}</span>
+          <span v-if="collectPanes(tab.tree).length > 1" class="rounded bg-muted px-1 text-[10px]">{{ collectPanes(tab.tree).length }}</span>
+        </button>
+        <button class="mr-1 flex size-6 items-center justify-center rounded text-muted-foreground hover:bg-destructive/15 hover:text-destructive focus-visible:ring-2 focus-visible:ring-ring"
+          :aria-label="`Close tab ${tab.title}`" @click="tabs.closeTab(tab.id)"><X class="size-3" /></button>
       </div>
-      <button
-        class="inline-flex h-8 items-center gap-1.5 rounded-md bg-primary px-4 text-[13px] font-medium text-primary-foreground hover:bg-primary/90 transition-colors duration-100"
-        @click="newTab"
-      >
-        <Plus class="size-3.5" :stroke-width="1.75" />
-        Open Local Terminal
-      </button>
+      <button class="flex size-8 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring"
+        aria-label="New local tab" title="New local tab (Cmd/Ctrl+N)" @click="newTab"><Plus class="size-4" /></button>
+      <button v-if="!visible && tabs.tabs.length" class="ml-auto shrink-0 px-2 text-xs text-muted-foreground hover:text-foreground"
+        @click="emit('activate')">Back to terminal</button>
     </div>
-  </div>
+    <div v-show="visible && !ui.fullscreenPaneId" class="flex shrink-0 flex-wrap items-center gap-2 border-b border-border bg-background px-3 py-2">
+      <TerminalSquare class="size-4 text-muted-foreground" />
+      <span class="mr-auto text-xs font-medium">Terminal workspace <span class="ml-1 text-muted-foreground">{{ paneCount }} {{ paneCount === 1 ? 'pane' : 'panes' }}</span></span>
+      <button class="inline-flex h-8 items-center gap-1.5 rounded-md bg-primary px-3 text-xs font-medium text-primary-foreground hover:bg-primary/90 focus-visible:ring-2 focus-visible:ring-ring"
+        @click="chooseHost"><Server class="size-3.5" /> Add host</button>
+      <button class="toolbar-button" @click="newTab"><Plus class="size-3.5" /> Local tab</button>
+      <button class="toolbar-button" :disabled="!tabs.activePane" title="Add a local shell to the right. Use Add host to split with a remote host."
+        @click="split('horizontal')"><SplitSquareHorizontal class="size-3.5" /> Split right</button>
+      <button class="toolbar-button" :disabled="!tabs.activePane" title="Add a local shell below. Use Add host to split with a remote host."
+        @click="split('vertical')"><SplitSquareVertical class="size-3.5" /> Split below</button>
+    </div>
+    <TerminalWorkspace v-show="visible && tabs.tabs.length > 0" :visible="visible" />
+    <div v-if="visible && tabs.tabs.length === 0" class="flex flex-1 flex-col items-center justify-center gap-4 p-6 text-center">
+      <TerminalSquare class="size-12 text-muted-foreground/40" />
+      <h1 class="text-lg font-medium">Your terminal workspace</h1>
+      <p class="max-w-md text-sm text-muted-foreground">Connect a host or open a local shell. Add multiple hosts side by side without restarting your existing sessions.</p>
+      <button class="toolbar-button" @click="chooseHost">Connect a host</button>
+    </div>
+    <dialog ref="hostDialog" class="w-[min(480px,calc(100vw-32px))] rounded-xl border border-border bg-background p-0 text-foreground shadow-xl backdrop:bg-black/60"
+      aria-labelledby="host-picker-title" @keydown.stop>
+      <div class="flex items-center justify-between border-b border-border p-4">
+        <h2 id="host-picker-title" class="text-sm font-semibold">Add a host to your workspace</h2>
+        <button aria-label="Close host picker" class="rounded p-1 hover:bg-muted" @click="hostDialog?.close()"><X class="size-4" /></button>
+      </div>
+      <div class="space-y-3 p-4">
+        <label class="flex items-center gap-3 text-xs">Open host in
+          <select v-model="placement" class="min-w-0 flex-1 rounded-md border border-border bg-background p-2" aria-label="Open host in">
+            <option value="tab">New tab</option>
+            <option value="horizontal" :disabled="!tabs.activePane">Split right of active pane</option>
+            <option value="vertical" :disabled="!tabs.activePane">Split below active pane</option>
+          </select>
+        </label>
+        <input ref="hostSearch" v-model="query" aria-label="Search hosts" placeholder="Search by name, address or username"
+          class="w-full rounded-md border border-border bg-background p-2 text-sm outline-none focus:ring-2 focus:ring-ring" />
+        <div class="max-h-72 space-y-1 overflow-y-auto">
+          <button v-for="host in matchingHosts" :key="host.id" class="flex w-full items-center gap-3 rounded-md p-3 text-left hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring"
+            :aria-label="`Connect ${host.label}`" @click="openHost(host)">
+            <Server class="size-4 shrink-0 text-muted-foreground" />
+            <span class="min-w-0"><span class="block truncate text-sm font-medium">{{ host.label }}</span><span class="block truncate text-xs text-muted-foreground">{{ host.username }}@{{ host.hostname }}:{{ host.port }}</span></span>
+          </button>
+          <p v-if="!matchingHosts.length" class="p-3 text-sm text-muted-foreground">{{ hosts.hosts.length ? 'No matching hosts.' : 'Add your first host in Hosts, then return here.' }}</p>
+        </div>
+        <p class="text-xs text-muted-foreground">Only the new pane connects. Existing terminals keep their sessions and history.</p>
+      </div>
+    </dialog>
+  </section>
 </template>
+
+<style scoped>
+.toolbar-button { @apply inline-flex h-8 items-center gap-1.5 rounded-md border border-border px-2.5 text-xs text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-40 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring; }
+</style>
