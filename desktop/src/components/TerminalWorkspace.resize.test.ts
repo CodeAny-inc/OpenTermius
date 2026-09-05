@@ -4,7 +4,8 @@ import { mount } from "@vue/test-utils";
 import { nextTick } from "vue";
 import TerminalWorkspace from "./TerminalWorkspace.vue";
 import { useTabsStore } from "../stores/tabs";
-vi.mock("./TerminalPane.vue", () => ({ default: { props: ["pane", "tabId", "visible"], template: "<div />" } }));
+import { useUiStore } from "../stores/ui";
+vi.mock("./TerminalPane.vue", () => ({ default: { props: ["pane", "tabId", "visible"], template: '<div class="xterm"><textarea /></div>' } }));
 
 it("continues a pointer drag after the first reactive resize and stops on pointerup", async () => {
   setActivePinia(createPinia());
@@ -27,4 +28,24 @@ it("continues a pointer drag after the first reactive resize and stops on pointe
     await nextTick();
     expect(divider.attributes("aria-valuenow")).toBe("70");
   } finally { wrapper.unmount(); vi.restoreAllMocks(); }
+});
+
+it("exits fullscreen before xterm can consume Escape or forward it to the session", async () => {
+  setActivePinia(createPinia());
+  const tabs = useTabsStore();
+  const ui = useUiStore();
+  tabs.newTab();
+  const wrapper = mount(TerminalWorkspace, { props: { visible: true }, attachTo: document.body });
+  try {
+    ui.toggleFullscreen(tabs.activePaneId!);
+    await nextTick();
+    const input = wrapper.get("textarea").element;
+    const terminalHandler = vi.fn();
+    input.addEventListener("keydown", terminalHandler);
+    const event = new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true });
+    input.dispatchEvent(event);
+    expect(ui.fullscreenPaneId).toBeNull();
+    expect(terminalHandler).not.toHaveBeenCalled();
+    expect(event.defaultPrevented).toBe(true);
+  } finally { wrapper.unmount(); }
 });

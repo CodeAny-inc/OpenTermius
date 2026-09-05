@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch, onBeforeUnmount, type CSSProperties } from "vue";
+import { computed, ref, watch, onMounted, onBeforeUnmount, type CSSProperties } from "vue";
 import { useTabsStore, isPane, type Pane, type PaneTree, type SplitNode } from "../stores/tabs";
 import { useUiStore } from "../stores/ui";
 import TerminalPane from "./TerminalPane.vue";
@@ -71,8 +71,17 @@ function resizeKey(event: KeyboardEvent, d: Divider) {
   event.stopPropagation();
   tabs.setRatio(d.node.id, d.node.ratio + (event.key === keys[0] ? -0.05 : 0.05));
 }
-// Compare individual primitive values. Returning a new array from one getter
-// would cancel the drag after every reactive resize, even with unchanged IDs.
+// xterm consumes Escape before it reaches the app's bubbling shortcut listener.
+// Capture only terminal input here; search fields retain their own Escape behavior.
+function fullscreenEscape(event: KeyboardEvent) {
+  if (event.key !== "Escape" || !props.visible || !ui.fullscreenPaneId) return;
+  if (!(event.target instanceof Element) || !root.value?.contains(event.target) || !event.target.closest(".xterm")) return;
+  event.preventDefault();
+  event.stopPropagation();
+  ui.exitFullscreen();
+}
+onMounted(() => window.addEventListener("keydown", fullscreenEscape, true));
+// Compare individual primitive values so a ratio update does not cancel its drag.
 watch([
   () => tabs.activeTabId,
   () => props.visible,
@@ -81,7 +90,10 @@ watch([
   stopDrag?.();
   if (!layout.value.panes.some(p => p.pane.id === ui.fullscreenPaneId && p.tabId === tabs.activeTabId) || !props.visible) ui.exitFullscreen();
 });
-onBeforeUnmount(() => stopDrag?.());
+onBeforeUnmount(() => {
+  stopDrag?.();
+  window.removeEventListener("keydown", fullscreenEscape, true);
+});
 </script>
 
 <template>

@@ -151,7 +151,12 @@ try {
   await pane("atlas").getByRole("button", { name: "Fullscreen", exact: true }).click();
   const full = await pane("atlas").boundingBox();
   check("Fullscreen fills the window", full.width >= 1439 && full.height >= 899);
+  await pane("atlas").locator(".xterm-helper-textarea").focus();
+  const writesBeforeEscape = await page.evaluate(() => window.__terminalTest.writes.length);
   await page.keyboard.press("Escape");
+  await page.waitForFunction(() => !document.querySelector('[data-host-id="atlas"]')?.classList.contains("fixed"));
+  check("Escape exits fullscreen with terminal focus", await pane("atlas").getByRole("button", { name: "Fullscreen", exact: true }).isVisible());
+  check("Fullscreen Escape is not sent to the remote shell", await page.evaluate(() => window.__terminalTest.writes.length), writesBeforeEscape);
   await page.setViewportSize({ width: 900, height: 700 });
   await screenshot("06-compact-window");
   check("Compact window has no page overflow", await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
