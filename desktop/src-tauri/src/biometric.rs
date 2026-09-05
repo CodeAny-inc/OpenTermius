@@ -5,6 +5,16 @@ use tauri::State;
 
 type ApiResult<T> = std::result::Result<T, String>;
 
+async fn blocking_platform_call<T, F>(operation: F) -> ApiResult<T>
+where
+    T: Send + 'static,
+    F: FnOnce() -> ApiResult<T> + Send + 'static,
+{
+    tokio::task::spawn_blocking(operation)
+        .await
+        .map_err(|e| format!("biometric worker failed: {e}"))?
+}
+
 /// Keychain identifiers for the stored vault passphrase. Each protected item is
 /// additionally bound to the current vault generation so an orphaned Keychain
 /// item can never become authoritative for a newly initialized vault.
@@ -315,8 +325,13 @@ use stub as platform;
 /// Best-effort migration cleanup for the static account used by earlier
 /// revisions. New vaults are protected primarily by per-vault Keychain account
 /// binding, so an orphaned bound item cannot attach to a newly initialized vault.
-pub(crate) fn clear_for_vault_initialization() -> ApiResult<()> {
-    platform::clear_legacy_passphrase()
+/// Cleanup failures are intentionally logged rather than returned: the legacy
+/// static account is not authoritative for the new vault generation and must not
+/// prevent creation of a password-only vault.
+pub(crate) async fn clear_for_vault_initialization() {
+    if let Err(error) = blocking_platform_call(platform::clear_legacy_passphrase).await {
+        tracing::warn!("failed to clean legacy biometric credential during vault initialization: {error}");
+    }
 }
 
 // ============================================================
@@ -344,7 +359,7 @@ pub async fn biometric_passphrase_stored(
         }
     };
 
-    platform::passphrase_stored(&binding_id)
+    blocking_platform_call(move || platform::passphrase_stored(&binding_id)).await
 }
 
 /// Store the vault passphrase in the OS keychain, protected by Touch ID.
@@ -365,7 +380,10 @@ pub async fn store_biometric_passphrase(
         vault_binding_id(&vault)?
     };
 
-    platform::store_passphrase(&binding_id, passphrase.as_str())
+    blocking_platform_call(move || {
+        platform::store_passphrase(&binding_id, passphrase.as_str())
+    })
+    .await
 }
 
 /// Unlock the vault by retrieving the passphrase from the Keychain item bound
@@ -379,11 +397,10 @@ pub async fn unlock_with_biometric(state: State<'_, Arc<AppState>>) -> ApiResult
         vault_binding_id(&vault)?
     };
 
-    let passphrase = tokio::task::spawn_blocking(move || {
+    let passphrase = blocking_platform_call(move || {
         platform::retrieve_passphrase(&binding_id)
     })
-    .await
-    .map_err(|e| e.to_string())??;
+    .await?;
 
     let vault = state.vault.lock().await;
     vault
@@ -411,8 +428,11 @@ pub async fn clear_biometric_passphrase(
         vault.binding_id().map(str::to_owned)
     };
 
-    if let Some(binding_id) = binding_id {
-        platform::clear_passphrase(&binding_id)?;
-    }
-    platform::clear_legacy_passphrase()
+    blocking_platform_call(move || {
+        if let Some(binding_id) = binding_id {
+            platform::clear_passphrase(&binding_id)?;
+        }
+        platform::clear_legacy_passphrase()
+    })
+    .await
 }
