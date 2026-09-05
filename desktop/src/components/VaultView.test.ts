@@ -31,6 +31,65 @@ describe("VaultView biometric settings", () => {
     wrapper.unmount();
   });
 
+  it("does not auto-prompt when Touch ID is enrolled but temporarily unavailable", async () => {
+    const pinia = createPinia();
+    setActivePinia(pinia);
+    const vault = useVaultStore();
+
+    vault.initialized = true;
+    vault.unlocked = false;
+    vault.biometricAvailable = false;
+    vault.biometricEnabled = true;
+
+    vi.spyOn(vault, "checkStatus").mockResolvedValue(undefined);
+    const unlockWithBiometric = vi
+      .spyOn(vault, "unlockWithBiometric")
+      .mockResolvedValue(undefined);
+
+    const wrapper = mount(VaultView, {
+      global: {
+        plugins: [pinia],
+      },
+    });
+    await flushPromises();
+
+    expect(unlockWithBiometric).not.toHaveBeenCalled();
+    expect(wrapper.text()).not.toContain("Unlock with Touch ID");
+    expect(wrapper.text()).toContain("Master passphrase");
+
+    wrapper.unmount();
+  });
+
+  it("keeps enrolled biometric settings accessible while Touch ID is unavailable", async () => {
+    const pinia = createPinia();
+    setActivePinia(pinia);
+    const vault = useVaultStore();
+
+    vault.initialized = true;
+    vault.unlocked = true;
+    vault.biometricAvailable = false;
+    vault.biometricEnabled = true;
+
+    vi.spyOn(vault, "checkStatus").mockResolvedValue(undefined);
+
+    const wrapper = mount(VaultView, {
+      global: {
+        plugins: [pinia],
+      },
+    });
+    await flushPromises();
+
+    expect(wrapper.text()).toContain("Touch ID / Biometric Unlock");
+    expect(wrapper.text()).toContain("Touch ID is currently unavailable");
+    expect(
+      wrapper
+        .findAll("button")
+        .some((button) => button.text().includes("Disable biometric unlock")),
+    ).toBe(true);
+
+    wrapper.unmount();
+  });
+
   it("blocks passphrase unlock while Touch ID is pending", async () => {
     const pinia = createPinia();
     setActivePinia(pinia);
