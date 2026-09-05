@@ -265,6 +265,12 @@ const showBiometricButton = computed(
             Lock the vault when you're done to keep your data secure.
           </p>
 
+          <!-- Reconciliation fails closed by hiding biometric settings. Keep
+               its error visible independently of those capability flags. -->
+          <p v-if="displayRuntimeError" role="alert" class="text-[12px] text-destructive">
+            {{ displayRuntimeError }}
+          </p>
+
           <!-- Biometric settings -->
           <div
             v-if="vault.biometricAvailable || vault.biometricEnabled"
@@ -274,10 +280,6 @@ const showBiometricButton = computed(
               <Fingerprint class="size-4 text-muted-foreground" :stroke-width="1.75" />
               <span class="text-[13px] font-medium">Touch ID / Biometric Unlock</span>
             </div>
-
-            <p v-if="displayRuntimeError" class="text-[12px] text-destructive mb-3">
-              {{ displayRuntimeError }}
-            </p>
 
             <!-- Biometric enabled -->
             <template v-if="vault.biometricEnabled">
