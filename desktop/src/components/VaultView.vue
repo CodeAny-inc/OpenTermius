@@ -24,6 +24,7 @@ const error = ref("");
 const unlockLoading = ref<"password" | "biometric" | null>(null);
 const enableBiometricMode = ref(false);
 const biometricPassphrase = ref("");
+const biometricSettingsLoading = ref<"enable" | "disable" | null>(null);
 
 const displayRuntimeError = computed(() => error.value || vault.error || "");
 
@@ -91,23 +92,44 @@ async function tryBiometricUnlock() {
   }
 }
 
-async function enableBiometric() {
+function resetBiometricEnableForm() {
+  biometricPassphrase.value = "";
+  enableBiometricMode.value = false;
+}
+
+function cancelBiometricEnable() {
+  if (biometricSettingsLoading.value !== null) return;
+  resetBiometricEnableForm();
   error.value = "";
+}
+
+async function enableBiometric() {
+  if (!biometricPassphrase.value || biometricSettingsLoading.value !== null) return;
+  error.value = "";
+  biometricSettingsLoading.value = "enable";
   try {
     await vault.enableBiometric(biometricPassphrase.value);
-    biometricPassphrase.value = "";
-    enableBiometricMode.value = false;
+    resetBiometricEnableForm();
   } catch (e: any) {
+    // Do not keep the master passphrase referenced in component state after a
+    // failed Keychain enrollment attempt. The user can explicitly enter it again.
+    biometricPassphrase.value = "";
     error.value = String(e);
+  } finally {
+    biometricSettingsLoading.value = null;
   }
 }
 
 async function disableBiometric() {
+  if (biometricSettingsLoading.value !== null) return;
   error.value = "";
+  biometricSettingsLoading.value = "disable";
   try {
     await vault.disableBiometric();
   } catch (e: any) {
     error.value = String(e);
+  } finally {
+    biometricSettingsLoading.value = null;
   }
 }
 
@@ -257,7 +279,17 @@ const showBiometricButton = computed(
                   You can still disable biometric unlock below.
                 </template>
               </p>
-              <Button variant="outline" size="sm" @click="disableBiometric">
+              <Button
+                variant="outline"
+                size="sm"
+                :disabled="biometricSettingsLoading !== null"
+                @click="disableBiometric"
+              >
+                <Loader2
+                  v-if="biometricSettingsLoading === 'disable'"
+                  class="size-3.5 mr-1 animate-spin"
+                  :stroke-width="1.75"
+                />
                 Disable biometric unlock
               </Button>
             </template>
@@ -279,22 +311,43 @@ const showBiometricButton = computed(
                     v-model="biometricPassphrase"
                     type="password"
                     placeholder="Enter your master passphrase"
+                    :disabled="biometricSettingsLoading !== null"
                     @keydown.enter="enableBiometric"
                   />
                 </FormGroup>
                 <div class="flex items-center gap-2">
-                  <Button size="sm" @click="enableBiometric">
-                    <Fingerprint class="size-3.5" :stroke-width="1.75" />
-                    Enable
+                  <Button
+                    size="sm"
+                    :disabled="biometricSettingsLoading !== null || !biometricPassphrase"
+                    @click="enableBiometric"
+                  >
+                    <Loader2
+                      v-if="biometricSettingsLoading === 'enable'"
+                      class="size-3.5 mr-1 animate-spin"
+                      :stroke-width="1.75"
+                    />
+                    <Fingerprint v-else class="size-3.5" :stroke-width="1.75" />
+                    {{ biometricSettingsLoading === "enable" ? "Enabling..." : "Enable" }}
                   </Button>
-                  <Button variant="ghost" size="sm" @click="enableBiometricMode = false; error = ''">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    :disabled="biometricSettingsLoading !== null"
+                    @click="cancelBiometricEnable"
+                  >
                     Cancel
                   </Button>
                 </div>
               </div>
 
               <!-- Enable button -->
-              <Button v-else variant="outline" size="sm" @click="enableBiometricMode = true">
+              <Button
+                v-else
+                variant="outline"
+                size="sm"
+                :disabled="biometricSettingsLoading !== null"
+                @click="enableBiometricMode = true"
+              >
                 <Fingerprint class="size-3.5" :stroke-width="1.75" />
                 Enable biometric unlock
               </Button>

@@ -171,4 +171,118 @@ describe("VaultView biometric settings", () => {
 
     wrapper.unmount();
   });
+
+  it("serializes Touch ID enrollment and prevents cancel while it is pending", async () => {
+    const pinia = createPinia();
+    setActivePinia(pinia);
+    const vault = useVaultStore();
+
+    vault.initialized = true;
+    vault.unlocked = true;
+    vault.biometricAvailable = true;
+    vault.biometricEnabled = false;
+    vi.spyOn(vault, "checkStatus").mockResolvedValue(undefined);
+
+    let finishEnable!: () => void;
+    const enableBiometric = vi
+      .spyOn(vault, "enableBiometric")
+      .mockImplementation(
+        () =>
+          new Promise<void>((resolve) => {
+            finishEnable = resolve;
+          }),
+      );
+
+    const wrapper = mount(VaultView, {
+      global: {
+        plugins: [pinia],
+      },
+    });
+    await flushPromises();
+
+    const openButton = wrapper
+      .findAll("button")
+      .find((button) => button.text().includes("Enable biometric unlock"));
+    expect(openButton).toBeDefined();
+    await openButton!.trigger("click");
+
+    const passphraseInput = wrapper.get("#bio-pass");
+    await passphraseInput.setValue("correct horse battery staple");
+
+    const enableButton = wrapper
+      .findAll("button")
+      .find((button) => button.text().trim() === "Enable");
+    expect(enableButton).toBeDefined();
+    await enableButton!.trigger("click");
+    await flushPromises();
+
+    expect(enableBiometric).toHaveBeenCalledWith("correct horse battery staple");
+    expect((wrapper.get("#bio-pass").element as HTMLInputElement).disabled).toBe(true);
+
+    const pendingEnableButton = wrapper
+      .findAll("button")
+      .find((button) => button.text().includes("Enabling..."));
+    const cancelButton = wrapper
+      .findAll("button")
+      .find((button) => button.text().trim() === "Cancel");
+
+    expect(pendingEnableButton).toBeDefined();
+    expect((pendingEnableButton!.element as HTMLButtonElement).disabled).toBe(true);
+    expect(cancelButton).toBeDefined();
+    expect((cancelButton!.element as HTMLButtonElement).disabled).toBe(true);
+
+    await cancelButton!.trigger("click");
+    expect(wrapper.find("#bio-pass").exists()).toBe(true);
+
+    finishEnable();
+    await flushPromises();
+
+    expect(wrapper.find("#bio-pass").exists()).toBe(false);
+    wrapper.unmount();
+  });
+
+  it("clears the entered master passphrase when biometric enrollment is canceled", async () => {
+    const pinia = createPinia();
+    setActivePinia(pinia);
+    const vault = useVaultStore();
+
+    vault.initialized = true;
+    vault.unlocked = true;
+    vault.biometricAvailable = true;
+    vault.biometricEnabled = false;
+    vi.spyOn(vault, "checkStatus").mockResolvedValue(undefined);
+
+    const wrapper = mount(VaultView, {
+      global: {
+        plugins: [pinia],
+      },
+    });
+    await flushPromises();
+
+    const openEnrollment = async () => {
+      const openButton = wrapper
+        .findAll("button")
+        .find((button) => button.text().includes("Enable biometric unlock"));
+      expect(openButton).toBeDefined();
+      await openButton!.trigger("click");
+      await flushPromises();
+    };
+
+    await openEnrollment();
+    await wrapper.get("#bio-pass").setValue("correct horse battery staple");
+
+    const cancelButton = wrapper
+      .findAll("button")
+      .find((button) => button.text().trim() === "Cancel");
+    expect(cancelButton).toBeDefined();
+    await cancelButton!.trigger("click");
+    await flushPromises();
+
+    expect(wrapper.find("#bio-pass").exists()).toBe(false);
+
+    await openEnrollment();
+    expect((wrapper.get("#bio-pass").element as HTMLInputElement).value).toBe("");
+
+    wrapper.unmount();
+  });
 });
