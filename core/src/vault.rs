@@ -72,10 +72,20 @@ impl Vault {
         let payload = VaultPayload { keys: Vec::new() };
         let plaintext = serde_json::to_vec(&payload)?;
         let ciphertext = seal(passphrase, &salt, &plaintext)?;
-        self.file.salt = base64(salt);
-        self.file.ciphertext = base64(ciphertext);
-        self.file.keys_meta.clear();
-        self.save()
+        // Do not publish an initialized in-memory vault until persistence has
+        // succeeded. Otherwise a failed save makes the command's existing-vault
+        // guard reject every retry, even after the filesystem problem is fixed.
+        let candidate = Self {
+            path: self.path.clone(),
+            file: VaultFile {
+                salt: base64(salt),
+                ciphertext: base64(ciphertext),
+                keys_meta: Vec::new(),
+            },
+        };
+        candidate.save()?;
+        self.file = candidate.file;
+        Ok(())
     }
 
     /// Verify that a passphrase can decrypt the vault payload without exposing
@@ -233,5 +243,49 @@ mod tests {
 
         let reopened = Vault::open(path).expect("reopen vault");
         assert_eq!(reopened.binding_id(), Some(binding_id.as_str()));
+    }
+
+    #[test]
+    fn failed_parent_creation_leaves_initialization_retryable() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let parent = dir.path().join("blocked-parent");
+        std::fs::write(&parent, b"not a directory").expect("block parent");
+        let path = parent.join("vault.json");
+        let mut vault = Vault::open(path.clone()).expect("open vault");
+
+        assert!(vault.initialize("first attempt passphrase").is_err());
+        assert!(!vault.is_initialized());
+        assert!(vault.binding_id().is_none());
+        assert!(vault.keys_meta().is_empty());
+
+        std::fs::remove_file(&parent).expect("repair parent");
+        vault.initialize("retry passphrase").expect("retry same vault");
+        assert!(vault.is_initialized());
+        assert!(vault.verify_passphrase("retry passphrase").is_ok());
+        assert!(vault.verify_passphrase("first attempt passphrase").is_err());
+        let reopened = Vault::open(path).expect("reopen persisted vault");
+        assert_eq!(reopened.binding_id(), vault.binding_id());
+        assert!(reopened.verify_passphrase("retry passphrase").is_ok());
+    }
+
+    #[test]
+    fn failed_file_write_leaves_initialization_retryable() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("vault.json");
+        let mut vault = Vault::open(path.clone()).expect("open vault");
+        // Parent creation succeeds, but writing to a directory fails reliably
+        // even when tests run with permission to write anywhere in the tempdir.
+        std::fs::create_dir(&path).expect("block vault file");
+
+        assert!(vault.initialize("first attempt passphrase").is_err());
+        assert!(!vault.is_initialized());
+        assert!(vault.binding_id().is_none());
+        assert!(vault.keys_meta().is_empty());
+
+        std::fs::remove_dir(&path).expect("repair vault path");
+        vault.initialize("retry passphrase").expect("retry same vault");
+        let reopened = Vault::open(path).expect("reopen persisted vault");
+        assert_eq!(reopened.binding_id(), vault.binding_id());
+        assert!(reopened.verify_passphrase("retry passphrase").is_ok());
     }
 }
