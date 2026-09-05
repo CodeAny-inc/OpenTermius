@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, watch, nextTick } from "vue";
+import { ref, watch, nextTick, onUnmounted } from "vue";
 import { useVaultStore } from "../stores/vault";
 import { useUiStore } from "../stores/ui";
 import Button from "./ui/Button.vue";
@@ -15,6 +15,17 @@ const passphrase = ref("");
 const error = ref("");
 const loading = ref<"password" | "biometric" | null>(null);
 
+function clearPassphrase() {
+  passphrase.value = "";
+}
+
+// This component stays mounted when its modal is hidden. Clear synchronously
+// at visibility/session boundaries, including a close/reopen or lock/unlock in
+// one tick, without resetting the busy guard for an in-flight authentication.
+watch(() => ui.showVaultUnlockModal, clearPassphrase, { flush: "sync" });
+watch(() => vault.unlocked, clearPassphrase, { flush: "sync" });
+onUnmounted(clearPassphrase);
+
 function focusPassphraseInput() {
   nextTick(() => {
     document.getElementById("modal-pass")?.focus();
@@ -26,7 +37,7 @@ watch(
   async (open) => {
     if (!open) return;
 
-    passphrase.value = "";
+    clearPassphrase();
     error.value = "";
     loading.value = null;
 
@@ -51,7 +62,7 @@ async function submit() {
   loading.value = "password";
   try {
     await vault.unlock(passphrase.value);
-    passphrase.value = "";
+    clearPassphrase();
     ui.resolveVaultUnlock(true);
   } catch (e) {
     error.value = String(e);
@@ -66,6 +77,7 @@ async function submitBiometric() {
   loading.value = "biometric";
   try {
     await vault.unlockWithBiometric();
+    clearPassphrase();
     ui.resolveVaultUnlock(true);
   } catch (e) {
     error.value = String(e);
@@ -79,7 +91,7 @@ function cancel() {
   // Do not resolve the caller as cancelled while a Touch ID request is still
   // capable of completing and unlocking the backend state.
   if (loading.value !== null) return;
-  passphrase.value = "";
+  clearPassphrase();
   error.value = "";
   ui.resolveVaultUnlock(false);
 }
