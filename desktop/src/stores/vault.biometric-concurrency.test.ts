@@ -197,4 +197,27 @@ describe("biometric state ordering", () => {
     expect(vault.initialized).toBe(true);
     expect(vault.biometricEnabled).toBe(false);
   });
+
+  it("dispatches initialization before a later lock can invalidate its auth generation", async () => {
+    const vault = useVaultStore();
+    vault.initialized = false;
+    const creation = deferred<void>();
+    let authGeneration = 0;
+    vi.mocked(api.initializeVault).mockImplementationOnce(() => {
+      const generationAtStart = authGeneration;
+      return creation.promise.then(() => generationAtStart === authGeneration);
+    });
+    vi.mocked(api.lockVault).mockImplementationOnce(async () => {
+      ++authGeneration;
+    });
+
+    const initialization = vault.initialize("new vault passphrase");
+    await vault.lock();
+    creation.resolve(undefined);
+    await initialization;
+
+    expect(api.initializeVault).toHaveBeenCalledTimes(1);
+    expect(vault.initialized).toBe(true);
+    expect(vault.unlocked).toBe(false);
+  });
 });
