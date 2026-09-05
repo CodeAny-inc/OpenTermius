@@ -322,6 +322,16 @@ use macos as platform;
 #[cfg(not(all(target_os = "macos", feature = "macos-biometric")))]
 use stub as platform;
 
+fn finish_with_best_effort_legacy_cleanup(
+    context: &str,
+    result: ApiResult<()>,
+) -> ApiResult<()> {
+    if let Err(error) = result {
+        tracing::warn!("failed to clean legacy biometric credential during {context}: {error}");
+    }
+    Ok(())
+}
+
 /// Best-effort migration cleanup for the static account used by earlier
 /// revisions. New vaults are protected primarily by per-vault Keychain account
 /// binding, so an orphaned bound item cannot attach to a newly initialized vault.
@@ -329,9 +339,8 @@ use stub as platform;
 /// static account is not authoritative for the new vault generation and must not
 /// prevent creation of a password-only vault.
 pub(crate) async fn clear_for_vault_initialization() {
-    if let Err(error) = blocking_platform_call(platform::clear_legacy_passphrase).await {
-        tracing::warn!("failed to clean legacy biometric credential during vault initialization: {error}");
-    }
+    let result = blocking_platform_call(platform::clear_legacy_passphrase).await;
+    let _ = finish_with_best_effort_legacy_cleanup("vault initialization", result);
 }
 
 // ============================================================
@@ -417,8 +426,10 @@ pub async fn unlock_with_biometric(state: State<'_, Arc<AppState>>) -> ApiResult
     Ok(true)
 }
 
-/// Remove the biometric passphrase for the current vault generation. The
-/// pre-binding account used by earlier revisions is cleaned up as well.
+/// Remove the biometric passphrase for the current vault generation. Deleting
+/// that bound credential is authoritative; cleanup of the obsolete pre-binding
+/// account is best-effort migration hygiene and must not turn success into an
+/// apparent disable failure.
 #[tauri::command]
 pub async fn clear_biometric_passphrase(
     state: State<'_, Arc<AppState>>,
@@ -432,7 +443,25 @@ pub async fn clear_biometric_passphrase(
         if let Some(binding_id) = binding_id {
             platform::clear_passphrase(&binding_id)?;
         }
-        platform::clear_legacy_passphrase()
+        finish_with_best_effort_legacy_cleanup(
+            "biometric disable",
+            platform::clear_legacy_passphrase(),
+        )
     })
     .await
+}
+
+#[cfg(test)]
+mod cleanup_tests {
+    use super::finish_with_best_effort_legacy_cleanup;
+
+    #[test]
+    fn legacy_cleanup_failure_does_not_fail_authoritative_disable() {
+        let result = finish_with_best_effort_legacy_cleanup(
+            "biometric disable",
+            Err("legacy cleanup failed".into()),
+        );
+
+        assert!(result.is_ok());
+    }
 }
