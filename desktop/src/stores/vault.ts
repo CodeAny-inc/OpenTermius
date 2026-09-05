@@ -16,28 +16,34 @@ export const useVaultStore = defineStore("vault", () => {
 
   async function reconcileBiometricState() {
     biometricEnabled.value = false;
-    if (!initialized.value || !biometricAvailable.value) return;
+    if (!initialized.value) return;
 
-    // This backend query is explicitly non-interactive, so it is safe to use
-    // after a failed Touch ID attempt to distinguish cancellation/transient
-    // failure from a credential that has disappeared or been invalidated.
+    // Credential existence and current biometric availability are deliberately
+    // independent. canEvaluatePolicy can be false during a temporary Touch ID
+    // lockout, but the protected Keychain item remains enabled and should become
+    // usable again once LocalAuthentication can evaluate the policy.
     biometricEnabled.value = await api.biometricPassphraseStored();
+  }
+
+  async function refreshBiometricState() {
+    biometricAvailable.value = await api.biometricAvailable();
+    await reconcileBiometricState();
   }
 
   async function checkStatus() {
     error.value = null;
     initialized.value = await api.vaultIsInitialized();
     unlocked.value = await api.isVaultUnlocked();
-    biometricAvailable.value = await api.biometricAvailable();
 
     try {
       // The protected Keychain item is the source of truth only for an existing
-      // vault. A stale credential must never make a not-yet-created vault look
-      // biometric-enabled.
-      await reconcileBiometricState();
+      // vault. Current LA availability is refreshed separately because it can
+      // change at runtime without changing whether the credential is enrolled.
+      await refreshBiometricState();
     } catch (e) {
       // Fail closed: never advertise biometric unlock if the Keychain state
       // cannot be established reliably.
+      biometricAvailable.value = false;
       error.value = String(e);
     }
   }
@@ -82,11 +88,15 @@ export const useVaultStore = defineStore("vault", () => {
     } catch (e) {
       const unlockError = e;
       try {
-        await reconcileBiometricState();
+        // A failed attempt can itself change LocalAuthentication availability
+        // (for example by entering biometric lockout), so refresh both pieces of
+        // state while preserving the credential-enrollment bit independently.
+        await refreshBiometricState();
       } catch {
         // The reconciliation itself is fail-closed because it clears
         // biometricEnabled before probing. Preserve the original unlock error
         // for the user instead of replacing it with a secondary probe error.
+        biometricAvailable.value = false;
       }
       error.value = String(unlockError);
       throw unlockError;
@@ -98,6 +108,7 @@ export const useVaultStore = defineStore("vault", () => {
     try {
       await api.storeBiometricPassphrase(passphrase);
       biometricEnabled.value = true;
+      biometricAvailable.value = await api.biometricAvailable();
     } catch (e) {
       const enableError = e;
       try {
@@ -141,6 +152,7 @@ export const useVaultStore = defineStore("vault", () => {
     needsSetup,
     needsUnlock,
     checkStatus,
+    refreshBiometricState,
     initialize,
     unlock,
     unlockWithBiometric,
