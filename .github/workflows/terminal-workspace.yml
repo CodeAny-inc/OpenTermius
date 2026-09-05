@@ -10,15 +10,22 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: terminal-workspace-ui-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
 jobs:
   browser-ui:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
+      # Reproduce the historical bugs only against the known pre-fix base.
+      # Future PRs must not be expected to reproduce bugs already fixed in main.
       - uses: actions/checkout@v4
+        if: github.event.pull_request.base.sha == 'c532f3234ecc64050908edd42c8ffc5fc64ce53b'
         with:
-          ref: ${{ github.event.pull_request.base.sha }}
+          ref: c532f3234ecc64050908edd42c8ffc5fc64ce53b
           path: baseline
       - uses: actions/setup-node@v4
         with:
@@ -38,25 +45,29 @@ jobs:
           npm run build 2>&1 | tee ui-test-results/build.log
       - name: Install isolated, pinned browser tooling
         run: |
-          npm install --prefix desktop/e2e --ignore-scripts --no-audit --no-fund
+          npm ci --prefix desktop/e2e --ignore-scripts --no-audit --no-fund
           desktop/e2e/node_modules/.bin/playwright install --with-deps chromium
-      - name: Start changed application and baseline
+      - name: Start application and optional historical baseline
         run: |
           (cd desktop && npm run dev -- --host 127.0.0.1 > "$RUNNER_TEMP/terminal-vite.log" 2>&1) &
-          ln -s ../../desktop/node_modules baseline/desktop/node_modules
-          (cd baseline/desktop && ../../desktop/node_modules/.bin/vite --host 127.0.0.1 --port 1421 > "$RUNNER_TEMP/terminal-baseline.log" 2>&1) &
+          if [ -d baseline/desktop ]; then
+            ln -s ../../desktop/node_modules baseline/desktop/node_modules
+            (cd baseline/desktop && ../../desktop/node_modules/.bin/vite --host 127.0.0.1 --port 1421 > "$RUNNER_TEMP/terminal-baseline.log" 2>&1) &
+          fi
           for attempt in $(seq 1 60); do
-            if curl --fail --silent http://127.0.0.1:1420 > /dev/null && curl --fail --silent http://127.0.0.1:1421 > /dev/null; then
-              exit 0
+            if curl --fail --silent http://127.0.0.1:1420 > /dev/null; then
+              if [ ! -d baseline/desktop ] || curl --fail --silent http://127.0.0.1:1421 > /dev/null; then
+                exit 0
+              fi
             fi
             sleep 1
           done
-          cat "$RUNNER_TEMP/terminal-vite.log" "$RUNNER_TEMP/terminal-baseline.log"
+          cat "$RUNNER_TEMP/terminal-vite.log"
           exit 1
       - name: Verify navigation, persistent hosts, layout and connection lifecycle
         env:
           UI_URL: http://127.0.0.1:1420
-          BASELINE_URL: http://127.0.0.1:1421
+          BASELINE_URL: ${{ github.event.pull_request.base.sha == 'c532f3234ecc64050908edd42c8ffc5fc64ce53b' && 'http://127.0.0.1:1421' || '' }}
           UI_RESULTS: ${{ github.workspace }}/desktop/ui-test-results
         run: node desktop/e2e/terminal-workspace.mjs
       - name: Upload screenshots, assertions and runnable frontend
