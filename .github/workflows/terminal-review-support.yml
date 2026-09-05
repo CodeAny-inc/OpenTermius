@@ -1,0 +1,32 @@
+name: Terminal review inputs
+on:
+  pull_request:
+    branches: [main]
+    paths: ['.github/workflows/terminal-review-support.yml']
+permissions:
+  contents: read
+jobs:
+  review-inputs:
+    if: github.event.pull_request.number == 6 && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: |
+          npm ci --prefix desktop
+          npm ci --prefix desktop/e2e --ignore-scripts
+          tar -czf "$RUNNER_TEMP/desktop-review-inputs.tgz" --exclude='.git' --exclude='dist' --exclude='ui-test-results' desktop AGENTS.md docs .github .gitignore
+          gh --version
+          gh pr edit --help > "$RUNNER_TEMP/gh-pr-edit-help.txt"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: terminal-review-inputs
+          retention-days: 1
+          path: |
+            ${{ runner.temp }}/desktop-review-inputs.tgz
+            ${{ runner.temp }}/gh-pr-edit-help.txt
