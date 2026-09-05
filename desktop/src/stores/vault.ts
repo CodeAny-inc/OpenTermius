@@ -26,8 +26,16 @@ export const useVaultStore = defineStore("vault", () => {
   }
 
   async function refreshBiometricState() {
-    biometricAvailable.value = await api.biometricAvailable();
-    await reconcileBiometricState();
+    try {
+      biometricAvailable.value = await api.biometricAvailable();
+      await reconcileBiometricState();
+    } catch (e) {
+      // A failed capability or Keychain probe must never leave stale UI state
+      // advertising an unlock path whose current status could not be verified.
+      biometricAvailable.value = false;
+      biometricEnabled.value = false;
+      throw e;
+    }
   }
 
   async function checkStatus() {
@@ -41,9 +49,6 @@ export const useVaultStore = defineStore("vault", () => {
       // change at runtime without changing whether the credential is enrolled.
       await refreshBiometricState();
     } catch (e) {
-      // Fail closed: never advertise biometric unlock if the Keychain state
-      // cannot be established reliably.
-      biometricAvailable.value = false;
       error.value = String(e);
     }
   }
@@ -93,10 +98,8 @@ export const useVaultStore = defineStore("vault", () => {
         // state while preserving the credential-enrollment bit independently.
         await refreshBiometricState();
       } catch {
-        // The reconciliation itself is fail-closed because it clears
-        // biometricEnabled before probing. Preserve the original unlock error
-        // for the user instead of replacing it with a secondary probe error.
-        biometricAvailable.value = false;
+        // refreshBiometricState already fails closed. Preserve the original
+        // unlock error for the user instead of replacing it with a probe error.
       }
       error.value = String(unlockError);
       throw unlockError;
@@ -108,7 +111,6 @@ export const useVaultStore = defineStore("vault", () => {
     try {
       await api.storeBiometricPassphrase(passphrase);
       biometricEnabled.value = true;
-      biometricAvailable.value = await api.biometricAvailable();
     } catch (e) {
       const enableError = e;
       try {
