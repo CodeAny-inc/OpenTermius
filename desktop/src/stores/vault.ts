@@ -82,22 +82,26 @@ export const useVaultStore = defineStore("vault", () => {
   }
 
   async function initialize(passphrase: string) {
-    return mutateBiometricState(async () => {
-      error.value = null;
-      try {
-        // The backend owns the entire initialization boundary: it first rejects
-        // an already-initialized vault, then handles legacy Keychain cleanup and
-        // creates the new vault. Do not clear biometric state before that guard,
-        // or a stale frontend call could delete credentials for an existing vault.
-        const unlockedAfterInitialization = await api.initializeVault(passphrase);
-        initialized.value = true;
-        unlocked.value = unlockedAfterInitialization;
-        biometricEnabled.value = false;
-      } catch (e) {
-        error.value = String(e);
-        throw e;
-      }
-    });
+    // Invalidate old biometric snapshots without queueing authentication behind
+    // credential writes. Dispatch to the backend immediately so a later lock
+    // can invalidate this initialization's authentication generation.
+    ++biometricStateRevision;
+    error.value = null;
+    try {
+      // The backend owns the entire initialization boundary: it first rejects
+      // an already-initialized vault, then handles legacy Keychain cleanup and
+      // creates the new vault. Do not clear biometric state before that guard,
+      // or a stale frontend call could delete credentials for an existing vault.
+      const unlockedAfterInitialization = await api.initializeVault(passphrase);
+      // Also discard any snapshot started while initialization was pending.
+      ++biometricStateRevision;
+      initialized.value = true;
+      unlocked.value = unlockedAfterInitialization;
+      biometricEnabled.value = false;
+    } catch (e) {
+      error.value = String(e);
+      throw e;
+    }
   }
 
   async function unlock(passphrase: string) {
