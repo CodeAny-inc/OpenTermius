@@ -58,11 +58,21 @@ function navigate(view: string) { emit("navigate", view); ui.closeMobileSidebar(
     <!-- Vault appears once, with its real state; creation lives in the session strip. -->
     <div class="mx-3 border-t border-sidebar-border py-3">
       <button class="sidebar-link" :class="{ 'sidebar-link-active': activeView === 'vault' }" :aria-label="`Vault, ${vaultUnlocked ? 'unlocked' : 'locked'}`" :title="`Vault: ${vaultUnlocked ? 'unlocked' : 'locked'}`" @click="navigate('vault')">
-        <Vault class="size-4 shrink-0" :stroke-width="1.75" />
+        <span class="relative flex size-4 shrink-0 items-center justify-center">
+          <Vault class="size-4" :stroke-width="1.75" />
+          <span v-if="compact" data-testid="compact-vault-status" class="absolute -right-1 -top-1 size-2 rounded-full ring-2 ring-sidebar"
+            :class="vaultUnlocked ? 'bg-emerald-500' : 'bg-muted-foreground'" aria-hidden="true" />
+        </span>
         <template v-if="!compact"><span class="flex-1 text-left">Vault</span><span class="size-1.5 rounded-full" :class="vaultUnlocked ? 'bg-emerald-500' : 'bg-muted-foreground'" /></template>
       </button>
-      <button class="sidebar-link" :class="{ 'sidebar-link-active': activeView === 'settings' }" aria-label="Settings" title="Settings" @click="navigate('settings')">
-        <Settings class="size-4 shrink-0" :stroke-width="1.75" />
+      <button class="sidebar-link" :class="{ 'sidebar-link-active': activeView === 'settings' }"
+        :aria-label="update.available ? 'Settings, update available' : 'Settings'"
+        :title="update.available ? 'Settings: update available' : 'Settings'" @click="navigate('settings')">
+        <span class="relative flex size-4 shrink-0 items-center justify-center">
+          <Settings class="size-4" :stroke-width="1.75" />
+          <span v-if="compact && update.available" data-testid="compact-update-status"
+            class="absolute -right-1 -top-1 size-2 rounded-full bg-blue-500 ring-2 ring-sidebar" aria-hidden="true" />
+        </span>
         <template v-if="!compact"><span class="flex-1 text-left">Settings</span><span v-if="update.available" class="size-1.5 rounded-full bg-blue-500" title="Update available" /></template>
       </button>
     </div>
