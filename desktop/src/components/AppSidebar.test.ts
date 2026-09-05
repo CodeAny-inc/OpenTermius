@@ -24,10 +24,10 @@ it("keeps vault and update status visible in the collapsed icon rail", async () 
   });
 
   expect(wrapper.get('[data-testid="compact-vault-status"]').classes()).toContain("bg-emerald-500");
-  expect(wrapper.get('[data-testid="compact-update-status"]').exists()).toBe(true);
-  expect(wrapper.get('button[aria-label="Settings, update available"]').exists()).toBe(true);
+  expect(wrapper.find('[data-testid="compact-update-status"]').exists()).toBe(true);
+  expect(wrapper.find('button[aria-label="Settings, update available"]').exists()).toBe(true);
 
   await wrapper.setProps({ vaultUnlocked: false });
   expect(wrapper.get('[data-testid="compact-vault-status"]').classes()).toContain("bg-muted-foreground");
-  expect(wrapper.get('button[aria-label="Vault, locked"]').exists()).toBe(true);
+  expect(wrapper.find('button[aria-label="Vault, locked"]').exists()).toBe(true);
 });
