@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, computed } from "vue";
+import { ref, onMounted, onUnmounted, computed, watch } from "vue";
 import { useVaultStore } from "../stores/vault";
 import Button from "./ui/Button.vue";
 import Input from "./ui/Input.vue";
@@ -27,6 +27,18 @@ const biometricPassphrase = ref("");
 const biometricSettingsLoading = ref<"enable" | "disable" | null>(null);
 
 const displayRuntimeError = computed(() => error.value || vault.error || "");
+
+function clearSensitiveFormState() {
+  passphrase.value = "";
+  confirmPassphrase.value = "";
+  resetBiometricEnableForm();
+}
+
+// This component stays mounted across lock/unlock, including automatic locks.
+// Clear synchronously so even a lock followed by an unlock in the same tick
+// cannot carry a typed secret into another authentication session.
+watch(() => vault.unlocked, clearSensitiveFormState, { flush: "sync" });
+onUnmounted(clearSensitiveFormState);
 
 onMounted(async () => {
   await vault.checkStatus();
@@ -85,6 +97,7 @@ async function tryBiometricUnlock() {
   error.value = "";
   try {
     await vault.unlockWithBiometric();
+    clearSensitiveFormState();
   } catch (e: any) {
     error.value = String(e);
   } finally {
