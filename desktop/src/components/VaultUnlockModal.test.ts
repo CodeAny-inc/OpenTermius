@@ -31,13 +31,14 @@ describe("VaultUnlockModal", () => {
     const ui = useUiStore();
     vault.biometricAvailable = true;
     vault.biometricEnabled = true;
+    vi.spyOn(vault, "refreshBiometricState").mockResolvedValue(undefined);
 
     const unlockWithBiometric = vi
       .spyOn(vault, "unlockWithBiometric")
       .mockResolvedValue(undefined);
 
     const unlockRequest = ui.requestVaultUnlock();
-    await nextTick();
+    await flushPromises();
 
     const touchIdButton = wrapper
       .findAll("button")
@@ -56,6 +57,7 @@ describe("VaultUnlockModal", () => {
     const ui = useUiStore();
     vault.biometricAvailable = true;
     vault.biometricEnabled = true;
+    vi.spyOn(vault, "refreshBiometricState").mockResolvedValue(undefined);
 
     let finishBiometric!: () => void;
     const unlockWithBiometric = vi
@@ -68,7 +70,7 @@ describe("VaultUnlockModal", () => {
       );
 
     const unlockRequest = ui.requestVaultUnlock();
-    await nextTick();
+    await flushPromises();
 
     const touchIdButton = wrapper
       .findAll("button")
@@ -106,5 +108,32 @@ describe("VaultUnlockModal", () => {
 
     await expect(unlockRequest).resolves.toBe(true);
     expect(ui.showVaultUnlockModal).toBe(false);
+  });
+
+  it("refreshes Touch ID availability every time the SSH unlock modal opens", async () => {
+    const vault = useVaultStore();
+    const ui = useUiStore();
+    vault.initialized = true;
+    vault.biometricAvailable = false;
+    vault.biometricEnabled = true;
+
+    const refreshBiometricState = vi
+      .spyOn(vault, "refreshBiometricState")
+      .mockImplementation(async () => {
+        vault.biometricAvailable = true;
+        vault.biometricEnabled = true;
+      });
+
+    const unlockRequest = ui.requestVaultUnlock();
+    await flushPromises();
+
+    expect(refreshBiometricState).toHaveBeenCalledTimes(1);
+    const touchIdButton = wrapper
+      .findAll("button")
+      .find((button) => button.text().includes("Unlock with Touch ID"));
+    expect(touchIdButton).toBeDefined();
+
+    ui.resolveVaultUnlock(false);
+    await expect(unlockRequest).resolves.toBe(false);
   });
 });
