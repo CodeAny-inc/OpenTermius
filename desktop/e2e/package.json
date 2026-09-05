@@ -1,0 +1,7 @@
+{
+  "name": "opentermius-browser-regressions",
+  "private": true,
+  "type": "module",
+  "scripts": { "test": "node terminal-workspace.mjs" },
+  "dependencies": { "playwright": "1.56.1" }
+}
